@@ -1,0 +1,32 @@
+name: Release
+
+# Crea l'installer Windows e lo pubblica nelle Releases quando si fa il push di un tag v* (es. v0.2.0).
+# L'app installata scarica da qui gli aggiornamenti.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            ui/package-lock.json
+      - name: Dipendenze
+        run: npm ci
+      - name: Interfaccia (Angular)
+        run: npm run build:ui
+      - name: Installer e pubblicazione
+        run: npx electron-builder --win --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

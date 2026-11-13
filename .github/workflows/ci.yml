@@ -1,0 +1,19 @@
+name: CI
+
+# Controlla a ogni push che l'interfaccia compili e che il codice di Electron sia valido.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run build:ui
+      - run: for f in electron/*.js; do node --check "$f"; done

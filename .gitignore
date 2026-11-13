@@ -1,0 +1,10 @@
+node_modules/
+ui/node_modules/
+ui/.angular/
+ui-dist/
+dist/
+data/
+config.json
+*.log
+.DS_Store
+Thumbs.db

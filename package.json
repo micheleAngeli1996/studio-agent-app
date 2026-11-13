@@ -1,0 +1,51 @@
+{
+  "name": "studio-agent-app",
+  "productName": "Studio Agent",
+  "version": "0.2.0",
+  "description": "Console di regia per gli agenti di produzione musicale (Cubase 15 Pro, Dorico 6 Pro) basati su Claude Code",
+  "main": "electron/main.js",
+  "author": "Michele Angeli",
+  "private": true,
+  "repository": { "type": "git", "url": "https://github.com/micheleAngeli1996/studio-agent-app.git" },
+  "scripts": {
+    "build:ui": "npm --prefix ui ci && npm --prefix ui run build",
+    "start": "electron .",
+    "dev": "npm run build:ui && electron .",
+    "dist": "npm run build:ui && electron-builder --win --publish never",
+    "release": "npm run build:ui && electron-builder --win --publish always"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
+  },
+  "devDependencies": {
+    "electron": "^39.0.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.micheleangeli.studioagent",
+    "productName": "Studio Agent",
+    "copyright": "Michele Angeli",
+    "directories": { "output": "dist", "buildResources": "build" },
+    "files": [
+      "electron/**/*",
+      "ui-dist/**/*",
+      "package.json",
+      "!**/*.map"
+    ],
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "icon": "build/icon.ico",
+      "artifactName": "Studio-Agent-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Studio Agent",
+      "deleteAppDataOnUninstall": false
+    },
+    "publish": [{ "provider": "github", "owner": "micheleAngeli1996", "repo": "studio-agent-app", "releaseType": "release" }]
+  }
+}
