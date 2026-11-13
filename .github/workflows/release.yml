@@ -1,11 +1,10 @@
 name: Release
 
-# Crea l'installer Windows e lo pubblica nelle Releases quando si fa il push di un tag v* (es. v0.2.0).
-# L'app installata scarica da qui gli aggiornamenti.
+# Crea l'installer Windows e lo pubblica nelle Releases quando si fa il push di un tag v* (es. v0.2.1).
+# L'app installata scarica da qui gli aggiornamenti (latest.yml + installer + blockmap).
 on:
   push:
     tags: ['v*']
-  workflow_dispatch:
 
 permissions:
   contents: write
@@ -26,7 +25,14 @@ jobs:
         run: npm ci
       - name: Interfaccia (Angular)
         run: npm run build:ui
-      - name: Installer e pubblicazione
-        run: npx electron-builder --win --publish always
+      - name: Installer
+        run: npx electron-builder --win --publish never
+      - name: Pubblicazione (una sola Release per tag)
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/*.exe dist/*.exe.blockmap dist/latest.yml \
+            --title "Studio Agent ${GITHUB_REF_NAME#v}" \
+            --notes "Novità: vedi CHANGELOG.md. Installa Studio-Agent-Setup-${GITHUB_REF_NAME#v}.exe; le versioni già installate si aggiornano da sole."

@@ -8,3 +8,10 @@ config.json
 *.log
 .DS_Store
 Thumbs.db
+
+# installer scaricati
+*.exe
+*.blockmap
+_pubblica.bat
+_pubblica.log
+_pubblica.py
