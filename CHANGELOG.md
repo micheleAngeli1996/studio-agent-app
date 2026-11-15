@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1 — 2026-11-15
+
+### Corretto
+- Uscita MIDI: il permesso Web MIDI veniva negato su Windows (Chromium lo chiede come «midiSysex»), quindi le porte non comparivano nel menu «Suono».
+
 ## 0.4.0 — 2026-11-15
 
 ### Aggiunto

@@ -203,9 +203,11 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
   app.whenReady().then(async () => {
-    // Web MIDI per suonare la progressione con Komplete Kontrol o altri strumenti (senza SysEx)
-    session.defaultSession.setPermissionRequestHandler((_wc, perm, cb) => cb(perm === 'midi'));
-    session.defaultSession.setPermissionCheckHandler((_wc, perm) => perm === 'midi');
+    // Web MIDI per suonare la progressione con Komplete Kontrol o altri strumenti.
+    // Chromium chiede il permesso come «midiSysex» anche con { sysex: false }; l'app manda solo note.
+    const midiPerm = (perm) => perm === 'midi' || perm === 'midiSysex';
+    session.defaultSession.setPermissionRequestHandler((_wc, perm, cb) => cb(midiPerm(perm)));
+    session.defaultSession.setPermissionCheckHandler((_wc, perm) => midiPerm(perm));
     if (!ROOT) {
       await dialog.showMessageBox({ type: 'info', title: 'Studio Agent', message: 'Scegli la cartella studio-agent',
         detail: 'Studio Agent usa gli agenti, i brani e gli strumenti che stanno nella tua cartella studio-agent (quella con .claude\\agents). Potrai cambiarla in seguito dal menu dei brani.' });
