@@ -227,7 +227,7 @@ function setupUpdates() {
   updater.on('update-downloaded', async (info) => {
     const r = await dialog.showMessageBox(win, { type: 'info', buttons: ['Riavvia ora', 'Più tardi'], defaultId: 0,
       title: 'Aggiornamento pronto', message: `Studio Agent ${info.version} è pronto.`, detail: 'Riavvia per installarlo, oppure verrà installato alla prossima chiusura.' });
-    if (r.response === 0) updater.quitAndInstall();
+    if (r.response === 0) updater.quitAndInstall(true, true);   // installazione silenziosa e riapertura dell'app
   });
   updater.on('error', () => {});
   updater.checkForUpdates().catch(() => {});

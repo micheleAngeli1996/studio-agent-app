@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.2 — 2026-11-15
+
+### Corretto
+- Aggiornamenti: «Riavvia ora» installa in modo silenzioso e riapre l'app, senza la finestra dell'installer da chiudere a mano.
+- Il pulsante «Ascolta al pianoforte» / «Ferma» ha larghezza fissa: i controlli accanto non si spostano più durante l'ascolto.
+
 ## 0.4.1 — 2026-11-15
 
 ### Corretto

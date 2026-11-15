@@ -1,7 +1,7 @@
 {
   "name": "studio-agent-app",
   "productName": "Studio Agent",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Console di regia per gli agenti di produzione musicale (Cubase 15 Pro, Dorico 6 Pro) basati su Claude Code",
   "main": "electron/main.js",
   "author": "Michele Angeli",
