@@ -136,6 +136,15 @@
               <span class="dim small">{{ cells().length }} accordi@if (progKey()) { · gradi in {{ progKey() }} }</span>
             </div>
             @if (harmOpen()) {
+              <div class="sections" role="tablist" aria-label="Sezioni del brano">
+                @for (t of sectionTabs(); track t.section) {
+                  <button role="tab" class="chip" [class.on]="section() === t.section" [attr.aria-selected]="section() === t.section" (click)="selectSection(t.section)">{{ sectionLabel(t.section) }}</button>
+                }
+                <select class="addsec" aria-label="Aggiungi una sezione" (change)="addSection($any($event.target).value); $any($event.target).value = ''">
+                  <option value="">+ Sezione</option>
+                  @for (n of sectionNames; track n) { <option [value]="n">{{ n }}</option> }
+                </select>
+              </div>
               <div class="hform">
                 <label class="grow">Accordi <span class="dim">(un accordo per battuta, «Am:2» = due tempi, «|» separa i gruppi)</span>
                   <input class="mono" [ngModel]="prog()" (ngModelChange)="prog.set($event)" placeholder="Am Dm E7 Am | F G C E7"></label>
@@ -156,13 +165,20 @@
                     <button [class.on]="playStyle() === 'arp'" role="radio" [attr.aria-checked]="playStyle() === 'arp'" (click)="playStyle.set('arp')">Arpeggio</button>
                   </div>
                   <label class="check"><input type="checkbox" [ngModel]="loop()" (ngModelChange)="loop.set($event)"> Ripeti</label>
+                  <label class="sound">Suono
+                    <select [ngModel]="soundId()" (ngModelChange)="setSound($event)" aria-label="Strumento per l'ascolto">
+                      <option value="internal">Pianoforte interno</option>
+                      @for (o of midiOutputs(); track o.id) { <option [value]="o.id">MIDI · {{ o.name }}</option> }
+                    </select></label>
                   <span class="dim small mono">{{ bpmNum() }} BPM · clic su un accordo per sentirlo</span>
                 </div>
+                @if (soundHint() || midiError()) { <p class="dim small hint">{{ midiError() || soundHint() }}</p> }
                 <div class="grid" role="list">
                   @for (c of cells(); track $index) {
-                    <button type="button" class="cell" role="listitem" [class.bad]="!c.ok" [class.now]="nowIdx() === $index" (click)="previewCell($index)" [disabled]="!c.ok" [attr.aria-label]="'Suona ' + c.name">
+                    <button type="button" class="cell" role="listitem" [class.bad]="!c.ok" [class.now]="nowIdx() === $index" [class.sel]="insertAfter() === $index" [class.gend]="c.groupEnd" (click)="previewCell($index)" [disabled]="!c.ok" [attr.aria-label]="'Suona ' + c.name">
                       <span class="mono cn">{{ c.name }}</span>
                       <span class="mono dim small">{{ c.ok ? (c.numeral || '—') : 'non riconosciuto' }}@if (c.beats !== beatsPerBar()) { · {{ c.beats }}t }</span>
+                      @if (c.cadence) { <span class="cad">cad. {{ c.cadence }}</span> }
                     </button>
                   }
                 </div>
@@ -171,7 +187,8 @@
                 <button class="btn primary" (click)="exportMidi()" [disabled]="!prog().trim()">Esporta MIDI per Cubase e Dorico</button>
                 <button class="btn" (click)="askHarmony()" [disabled]="!prog().trim() || !!busyId()">Chiedi l'analisi</button>
                 @if (song()) { <button class="btn" (click)="saveProgression()" [disabled]="!progDirty() || !prog().trim()">Salva nella memoria</button> }
-                <button class="btn" (click)="voicesOpen.set(!voicesOpen())" [attr.aria-expanded]="voicesOpen()">Controllo a quattro voci</button>
+                <button class="btn" (click)="realizeSatb()" [disabled]="!prog().trim() || satbBusy()">Realizza a quattro voci</button>
+                <button class="btn" (click)="voicesOpen.set(!voicesOpen())" [attr.aria-expanded]="voicesOpen()">Quattro voci ed esercizi</button>
                 <button class="btn ghost2" (click)="goOrchestration()">Passa all'orchestrazione →</button>
               </div>
               @if (harmMsg(); as h) {
@@ -179,11 +196,29 @@
               }
               @if (voicesOpen()) {
                 <div class="voices">
+                  @if (exercise(); as e) {
+                    <div class="exer">
+                      <p><strong>Esercizio · basso dato</strong> <span class="dim">({{ e.title }}, {{ sugHome() }})</span></p>
+                      <div class="chords">
+                        @for (c of e.chords; track $index) {
+                          @if (c.keyChange) { <span class="kc mono">→ {{ c.keyChange }}</span> }
+                          <span class="ch"><b class="mono">{{ c.numeral }}</b><small class="mono">{{ c.chord }}</small></span>
+                        }
+                      </div>
+                      @if (e.ref) { <button class="link small" (click)="rightTab.set('src'); loadPage(e.ref.book, e.ref.page)">De Ninno {{ e.ref.book === 'armonia2' ? 'vol. II' : 'vol. I' }}, p. {{ e.ref.page }} · {{ e.ref.label }}</button> }
+                    </div>
+                  }
                   <p class="dim small">Note con ottava, un accordo per posizione: <span class="mono">G4 A4 B4 C5</span> oppure <span class="mono">Sol4 La4 Si4 Do5</span>.</p>
                   @for (v of [['s','Soprano'],['a','Contralto'],['t','Tenore'],['b','Basso']]; track v[0]) {
                     <label class="vrow"><span>{{ v[1] }}</span><input class="mono" [ngModel]="$any(voices())[v[0]]" (ngModelChange)="patchVoices($any(v[0]), $event)"></label>
                   }
-                  <div class="acts"><button class="btn primary" (click)="runVoices()">Controlla</button><button class="btn" (click)="askVoices()" [disabled]="!!busyId()">Fallo spiegare all'agente</button></div>
+                  <div class="acts">
+                    <button class="btn primary" (click)="runVoices()">Controlla</button>
+                    <button class="btn" (click)="playVoices()">{{ playing() === 'satb' ? 'Ferma' : 'Ascolta le voci' }}</button>
+                    <button class="btn" (click)="newExercise()" [disabled]="satbBusy()">Nuovo esercizio (basso dato)</button>
+                    @if (exercise()) { <button class="btn" (click)="showSolution()">Mostra una soluzione</button> }
+                    <button class="btn" (click)="askVoices()" [disabled]="!!busyId()">Fallo spiegare all'agente</button>
+                  </div>
                   @if (voiceReport(); as r) { <pre class="report" [class.errtxt]="!r.ok" [class.has-err]="r.errors">{{ r.text }}</pre> }
                 </div>
               }
@@ -250,6 +285,7 @@
                   <button class="chip" [class.on]="!techFilter()" (click)="techFilter.set('')">Tutte</button>
                   @for (t of techniques; track t[0]) { <button class="chip" [class.on]="techFilter() === t[0]" (click)="techFilter.set(t[0])">{{ t[1] }}</button> }
                 </div>
+                <p class="small inspt">Aggiungi inserisce <strong>{{ insertLabel() }}</strong>@if (insertAfter() >= 0) { · <button class="link small" (click)="insertAfter.set(-1)">in coda</button> }<span class="dim"> — clicca un accordo della griglia per scegliere il punto.</span></p>
                 <button class="btn" (click)="askAgentSuggestions()" [disabled]="!!busyId()">Chiedi sviluppi su misura all'agente</button>
               </div>
               <div class="sugs">

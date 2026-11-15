@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0 — 2026-11-15
+
+### Aggiunto
+- **Uscita MIDI**: nella sezione Armonia il menu «Suono» manda la progressione a una porta MIDI invece che al pianoforte interno, per suonarla con Komplete Kontrol (The Grandeur, BBCSO Piano Pro) o con qualsiasi altro strumento. Indicazioni sulle porte della tastiera e della UR816.
+- **Realizza a quattro voci**: disposizione automatica Soprano, Alto, Tenor, Bass secondo le regole del trattato (`tools/satb.py`), controllata con voice_check e salvata come MusicXML + MIDI in `score/` per Dorico; «Ascolta le voci».
+- **Esercizi di basso dato**: basso generato da un modello armonico nella tonalità del brano, con gradi e pagina del De Ninno; controllo delle note estranee all'accordo e delle regole di condotta; «Mostra una soluzione».
+- **Cadenze nella griglia**: perfetta, evitata, plagale, sospesa e cadenze perfette su gradi tonicizzati.
+- **Punto di inserimento**: un clic su un accordo sceglie dove «Aggiungi» inserisce lo sviluppo armonico.
+- **Sezioni del brano**: progressioni separate per Intro, Verse, Chorus, Bridge…, salvate in SONG.md come `- Progressione (Chorus): ...`; MIDI e partiture prendono il nome della sezione.
+
 ## 0.3.0 — 2026-11-15
 
 ### Aggiunto

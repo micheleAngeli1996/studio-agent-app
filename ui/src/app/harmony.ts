@@ -11,7 +11,7 @@ const MAJ: Record<number, string> = { 0: 'I', 2: 'II', 4: 'III', 5: 'IV', 7: 'V'
 const MIN: Record<number, string> = { 0: 'I', 2: 'II', 3: 'III', 5: 'IV', 7: 'V', 8: 'VI', 10: 'VII', 11: 'VII' };
 const CHROM: Record<number, string> = { 1: '♭II', 3: '♭III', 6: '♯IV', 8: '♭VI', 10: '♭VII' };
 
-export interface Cell { name: string; beats: number; numeral: string; ok: boolean; bar: number; }
+export interface Cell { name: string; beats: number; numeral: string; ok: boolean; bar: number; groupEnd?: boolean; cadence?: string; }
 export interface Key { tonic: number; minor: boolean; label: string; }
 
 export function pc(l: string, a: string) { return (NOTE[l] + (a === '#' ? 1 : a === 'b' ? -1 : 0) + 12) % 12; }
@@ -31,7 +31,8 @@ export function analyze(prog: string, keyText: string, beatsPerBar = 4): Cell[] 
   const key = parseKey(keyText);
   const cells: Cell[] = [];
   let t = 0;
-  for (const tok of (prog || '').replace(/\|/g, ' ').split(/\s+/).filter(Boolean)) {
+  for (const tok of (prog || '').replace(/\|/g, ' | ').split(/\s+/).filter(Boolean)) {
+    if (tok === '|') { if (cells.length) cells[cells.length - 1].groupEnd = true; continue; }
     const m = tok.match(CH);
     if (!m || !QUAL.includes(m[3])) { cells.push({ name: tok, beats: beatsPerBar, numeral: '?', ok: false, bar: Math.floor(t / beatsPerBar) + 1 }); t += beatsPerBar; continue; }
     const beats = m[6] ? parseFloat(m[6]) : beatsPerBar;
@@ -48,7 +49,35 @@ export function analyze(prog: string, keyText: string, beatsPerBar = 4): Cell[] 
     cells.push({ name: tok.split(':')[0], beats, numeral, ok: true, bar: Math.floor(t / beatsPerBar) + 1 });
     t += beats;
   }
+  if (cells.length) cells[cells.length - 1].groupEnd = true;
+  if (key) markCadences(cells);
   return cells;
+}
+
+const DEG = /^(VII|VI|IV|V|III|II|I)/i;
+function degreeOf(n: string): { d: string; altered: boolean } | null {
+  const m = n.replace(/^[♭♯]/, '').match(DEG);
+  return m ? { d: m[1].toUpperCase(), altered: /^[♭♯]/.test(n) } : null;
+}
+
+/** Cadenze tra accordi consecutivi: perfetta (V→I), evitata (V→VI), plagale (IV→I), sospesa (fine frase sul V). */
+function markCadences(cells: Cell[]) {
+  for (let i = 0; i < cells.length; i++) {
+    const cur = cells[i], prev = cells[i - 1];
+    if (!cur.ok) continue;
+    const c = degreeOf(cur.numeral);
+    const p = prev?.ok ? degreeOf(prev.numeral) : null;
+    if (!c) continue;
+    if (p && !p.altered && (p.d === 'V' || (p.d === 'VII' && /°/.test(prev!.numeral))) && c.d === 'I' && !c.altered && !cur.numeral.includes('/')) cur.cadence = 'perfetta';
+    else if (p && !p.altered && p.d === 'V' && c.d === 'VI') cur.cadence = 'evitata';
+    else if (p && !p.altered && p.d === 'IV' && c.d === 'I' && !c.altered) cur.cadence = 'plagale';
+    else if (c.d === 'V' && !c.altered && cur.groupEnd && !(p && p.d === 'V')) cur.cadence = 'sospesa';
+    else if (prev?.ok && /^[A-G][#b]?(7|9)$/.test(prev.name.split('/')[0])) {
+      // dominante secondaria che risolve a una quinta sotto: cadenza perfetta nella tonalità di quel grado
+      const a = chordTones(prev.name), b = chordTones(cur.name);
+      if (a && b && (a.root - b.root + 12) % 12 === 7) cur.cadence = `perfetta in ${cur.numeral.replace(/7|\/.*/g, '')}`;
+    }
+  }
 }
 
 export const BOOKS = [

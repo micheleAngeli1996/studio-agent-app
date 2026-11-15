@@ -46,6 +46,7 @@ function parseSong(root, name) {
     goal: field(brief, 'Obiettivo'),
     compositionType: field(brief, 'Tipo di composizione'),
     progression: progressionOf(md),
+    sections: sectionsOf(md),
     tracks: table(section(md, 'Tracce').body).map((r) => ({ name: r[0], role: r[1] || '', instrument: r[2] || '' })).filter((t) => t.name),
     decisions: section(md, 'Decisioni').body.filter((l) => l.trim().startsWith('- ')).map((l) => {
       const parts = l.trim().slice(2).split(' · ');
@@ -109,12 +110,23 @@ function createSong(root, { title, bpm = '', key = '', meter = '4/4' }) {
 
 function progressionOf(md) {
   const body = section(md, 'Struttura e armonia').body;
-  const tagged = body.find((l) => /progressione/i.test(l) && /`[^`]+`/.test(l));
-  const any = tagged || body.find((l) => /`[^`]+`/.test(l));
+  const named = (l) => /^- Progressione\s*\(/i.test(l.trim());
+  const tagged = body.find((l) => /^- Progressione:\s*`/i.test(l.trim()));
+  const any = tagged || body.find((l) => !named(l) && /`[^`]+`/.test(l));
   return any ? any.match(/`([^`]+)`/)[1].trim() : '';
 }
 
-function setProgression(root, name, prog) {
+/** Progressioni per sezione: righe «- Progressione (Verse): `...`»; quella senza nome è la principale. */
+function sectionsOf(md) {
+  const out = [];
+  for (const l of section(md, 'Struttura e armonia').body) {
+    const m = l.trim().match(/^- Progressione(?:\s*\(([^)]+)\))?:\s*`([^`]+)`/i);
+    if (m) out.push({ section: (m[1] || '').trim(), progression: m[2].trim() });
+  }
+  return out;
+}
+
+function setProgression(root, name, prog, sectionName = '') {
   const file = path.join(root, 'songs', name, 'SONG.md');
   const clean = String(prog).replace(/`/g, '').replace(/\s+/g, ' ').trim();
   if (!clean) throw new Error('Progressione vuota');
@@ -122,9 +134,16 @@ function setProgression(root, name, prog) {
   const lines = md.split(/\r?\n/);
   const s = section(md, 'Struttura e armonia');
   if (s.start < 0) throw new Error('Sezione "Struttura e armonia" non trovata');
-  const line = `- Progressione: \`${clean}\``;
-  const i = lines.findIndex((l, k) => k > s.start && k < s.end && /^- Progressione: `/.test(l.trim()));
-  if (i >= 0) lines[i] = line; else lines.splice(s.start + 1, 0, line);
+  const sec = String(sectionName || '').replace(/[()`\r\n]/g, '').trim();
+  const label = sec ? `- Progressione (${sec}):` : '- Progressione:';
+  const line = `${label} \`${clean}\``;
+  const i = lines.findIndex((l, k) => k > s.start && k < s.end && l.trim().toLowerCase().startsWith(label.toLowerCase() + ' `'));
+  if (i >= 0) lines[i] = line;
+  else {
+    let last = -1;
+    for (let k = s.start + 1; k < s.end; k++) if (/^- Progressione/i.test(lines[k].trim())) last = k;
+    lines.splice(last >= 0 ? last + 1 : s.start + 1, 0, line);
+  }
   fs.writeFileSync(file, lines.join('\n'), 'utf8');
   return parseSong(root, name);
 }

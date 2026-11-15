@@ -83,7 +83,14 @@ export class Piano {
     this.wave = ctx.createPeriodicWave(real, imag);
   }
 
+  // ---------- uscita MIDI (Komplete Kontrol o altri strumenti) ----------
+  private midi: MIDIOutput | null = null;
+  private sent: { note: number; on: number }[] = [];
+  setMidiOutput(o: MIDIOutput | null) { this.stop(); this.midi = o; }
+  get usingMidi() { return !!this.midi; }
+
   private note(midi: number, when: number, dur: number, vel: number) {
+    if (this.midi) return this.midiNote(midi, when, dur, vel);
     const ctx = this.ctx!;
     const f = 440 * Math.pow(2, (midi - 69) / 12);
     const gain = ctx.createGain();
@@ -114,6 +121,22 @@ export class Piano {
     oscs[0].onended = () => { this.voices = this.voices.filter((x) => x !== v); gain.disconnect(); };
   }
 
+  /** Nota MIDI sul canale 1, con il tempo dell'orologio audio convertito in quello di performance.now(). */
+  private midiNote(n: number, when: number, dur: number, vel: number) {
+    const delay = Math.max(0, when - this.ctx!.currentTime) * 1000;
+    if (delay > 150) {                 // note lontane (arpeggi): programmate con un timer, che «Ferma» annulla
+      this.timers.push(window.setTimeout(() => this.midi && this.midiNote(n, this.ctx!.currentTime + 0.05, dur, vel), delay - 50));
+      return;
+    }
+    const on = performance.now() + delay;
+    const v = Math.max(1, Math.min(127, Math.round(vel * 127)));
+    this.midi!.send([0x90, n, v], on);
+    this.midi!.send([0x80, n, 0], on + dur * 1000);
+    this.sent.push({ note: n, on });
+    const now = performance.now();
+    this.sent = this.sent.filter((x) => x.on > now - 20000);
+  }
+
   /** Suona un accordo singolo (anteprima al clic). */
   chord(c: ChordTones, prev?: ChordTones) {
     this.init();
@@ -124,7 +147,8 @@ export class Piano {
     v.upper.forEach((n, i) => this.note(n, t + i * 0.008, 1.6, 0.62));
   }
 
-  /** Suona la progressione; onStep riceve l'indice dell'accordo che sta suonando, -1 alla fine. */
+  /** Suona la progressione; onStep riceve l'indice dell'accordo che sta suonando, -1 alla fine.
+   *  Ogni accordo viene programmato poco prima che suoni, così «Ferma» non lascia note in coda. */
   play(chords: ChordTones[], opt: PlayOptions, onStep: (i: number) => void) {
     this.stop();
     if (!chords.length) return;
@@ -132,38 +156,63 @@ export class Piano {
     const session = ++this.session;
     const beat = 60 / Math.max(30, Math.min(240, opt.bpm || 90));
     const vl = voiceLead(chords);
-    const run = (start: number) => {
-      let t = start;
-      chords.forEach((c, i) => {
-        const v = vl[i];
-        const len = c.beats * beat;
-        if (opt.style === 'block') {
-          this.note(v.bass, t, len * 0.96, 0.78);
-          v.upper.forEach((n, k) => this.note(n, t + k * 0.01, len * 0.94, 0.58));
-        } else {
-          // arpeggio in crome: basso, poi le voci superiori su e giù
-          const seq = [...v.upper, ...v.upper.slice(1, -1).reverse()];
-          const steps = Math.max(1, Math.round(c.beats * 2));
-          this.note(v.bass, t, len * 0.98, 0.78);
-          for (let s = 1; s < steps; s++) this.note(seq[(s - 1) % seq.length], t + s * beat / 2, Math.min(len - s * beat / 2, beat * 1.5), 0.5);
-        }
-        const delay = (t - this.ctx!.currentTime) * 1000;
-        this.timers.push(window.setTimeout(() => session === this.session && onStep(i), Math.max(0, delay)));
-        t += len;
-      });
-      const endDelay = (t - this.ctx!.currentTime) * 1000;
-      this.timers.push(window.setTimeout(() => {
-        if (session !== this.session) return;
-        if (opt.loop) run(this.ctx!.currentTime + 0.02); else onStep(-1);
-      }, Math.max(0, endDelay - 30)));
+    const ahead = 0.12;
+    const schedule = (i: number, t: number) => {
+      if (session !== this.session) return;
+      if (i === chords.length) {
+        const wait = (t - this.ctx!.currentTime) * 1000;
+        this.timers.push(window.setTimeout(() => {
+          if (session !== this.session) return;
+          if (opt.loop) schedule(0, this.ctx!.currentTime + 0.05); else onStep(-1);
+        }, Math.max(0, wait - 20)));
+        return;
+      }
+      const c = chords[i], v = vl[i], len = c.beats * beat;
+      if (opt.style === 'block') {
+        this.note(v.bass, t, len * 0.96, 0.78);
+        v.upper.forEach((n, k) => this.note(n, t + k * 0.01, len * 0.94, 0.58));
+      } else {
+        // arpeggio in crome: basso, poi le voci superiori su e giù
+        const seq = [...v.upper, ...v.upper.slice(1, -1).reverse()];
+        const steps = Math.max(1, Math.round(c.beats * 2));
+        this.note(v.bass, t, len * 0.98, 0.78);
+        for (let s = 1; s < steps; s++) this.note(seq[(s - 1) % seq.length], t + s * beat / 2, Math.min(len - s * beat / 2, beat * 1.5), 0.5);
+      }
+      this.timers.push(window.setTimeout(() => session === this.session && onStep(i), Math.max(0, (t - this.ctx!.currentTime) * 1000)));
+      const next = t + len;
+      this.timers.push(window.setTimeout(() => schedule(i + 1, next), Math.max(0, (next - ahead - this.ctx!.currentTime) * 1000)));
     };
-    run(this.ctx!.currentTime + 0.08);
+    schedule(0, this.ctx!.currentTime + 0.08);
+  }
+
+  /** Suona voci già scritte (basso, tenore, alto, soprano): un accordo ogni due tempi. */
+  playVoices(parts: number[][], bpm: number, onStep: (i: number) => void) {
+    this.stop();
+    this.init();
+    const session = ++this.session;
+    const len = 2 * 60 / Math.max(30, Math.min(240, bpm || 80));
+    const n = parts[0].length;
+    const step = (i: number, t: number) => {
+      if (session !== this.session) return;
+      if (i === n) { this.timers.push(window.setTimeout(() => session === this.session && onStep(-1), Math.max(0, (t - this.ctx!.currentTime) * 1000))); return; }
+      parts.forEach((p, k) => this.note(p[i], t, len * 0.95, k === 0 ? 0.72 : 0.6));
+      this.timers.push(window.setTimeout(() => session === this.session && onStep(i), Math.max(0, (t - this.ctx!.currentTime) * 1000)));
+      this.timers.push(window.setTimeout(() => step(i + 1, t + len), Math.max(0, (t + len - 0.12 - this.ctx!.currentTime) * 1000)));
+    };
+    step(0, this.ctx!.currentTime + 0.08);
   }
 
   stop() {
     this.session++;
     this.timers.forEach((t) => clearTimeout(t));
     this.timers = [];
+    if (this.midi) {
+      // note-off subito per le note suonate e di nuovo all'istante previsto per quelle già in coda
+      const now = performance.now();
+      for (const x of this.sent) { this.midi.send([0x80, x.note, 0]); if (x.on > now) this.midi.send([0x80, x.note, 0], x.on + 2); }
+      this.midi.send([0xB0, 123, 0]);
+      this.sent = [];
+    }
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
     for (const v of this.voices) {

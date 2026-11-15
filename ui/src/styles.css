@@ -193,3 +193,12 @@ button.cell:hover:not(:disabled) { border-color: var(--line2); } button.cell:dis
 .how { font-size: 13px; line-height: 1.5; color: var(--text2); }
 .sug .acts .btn { min-height: 34px; padding: 0 11px; font-size: 13px; }
 .sug h3 { margin: 0; font: 600 14px/1.35 var(--sans); letter-spacing: 0; text-transform: none; color: var(--text); }
+.sound { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text2); } .sound select { min-height: 34px; max-width: 240px; }
+.hint { margin-top: -4px; }
+.sections { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.addsec { min-height: 30px; border-radius: 15px; font-size: 12px; padding: 0 10px; color: var(--text2); }
+.cell.sel { border-color: var(--accent-line); border-style: dashed; }
+.cell.gend { box-shadow: inset -3px 0 0 #3a3d43; }
+.cad { margin-top: 2px; font: 600 10px var(--cond); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+.inspt { color: var(--text2); line-height: 1.5; }
+.exer { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; background: var(--card); border-radius: 6px; }

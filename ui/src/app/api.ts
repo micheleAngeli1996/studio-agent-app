@@ -4,7 +4,7 @@ export interface MixVersion { date: string; file: string; lufs: string; truePeak
 export interface SongFile { name: string; kind: string; path: string; }
 export interface Song {
   name: string; title: string; path: string; relPath: string; key: string; tempo: string; phase: string; goal: string;
-  progression?: string; compositionType?: string; tracks: Track[]; decisions: Decision[]; versions: MixVersion[]; files: SongFile[];
+  progression?: string; sections?: { section: string; progression: string }[]; compositionType?: string; tracks: Track[]; decisions: Decision[]; versions: MixVersion[]; files: SongFile[];
 }
 export interface UsageEntry {
   ts: string; agent: string; song: string; phase: string; request: string; input: number; output: number;
@@ -23,6 +23,7 @@ export type AgentEvent =
 export interface LimitWindow { utilization: number; resetsAt: number; status: string; }
 export interface Limits { fiveHour: LimitWindow | null; sevenDay: LimitWindow | null; at?: string; }
 export interface AskRequest { agent: string; prompt: string; resume?: string; song?: string; phase?: string; label?: string; }
+export interface Satb { ok: boolean; s?: string; a?: string; t?: string; b?: string; chords?: string[]; files?: string[]; message?: string; }
 export interface Analysis { ok: boolean; data?: Record<string, any>; message?: string; }
 
 export interface StudioApi {
@@ -32,10 +33,11 @@ export interface StudioApi {
   createSong(d: { title: string; bpm?: string; key?: string }): Promise<Song>;
   addDecision(song: string, agent: string, text: string): Promise<Song>;
   addVersion(song: string, v: { file: string; lufs: string; truePeak: string; note: string }): Promise<Song>;
-  setProgression(song: string, prog: string): Promise<Song>;
+  setProgression(song: string, prog: string, section?: string): Promise<Song>;
   setCompositionType(song: string, type: string): Promise<Song>;
   exportMidi(req: { song?: string; progression: string; bpm?: string; key?: string; name?: string }): Promise<{ ok: boolean; path?: string; message?: string }>;
   checkVoices(v: { s: string; a: string; t: string; b: string }): Promise<{ ok: boolean; errors?: boolean; report?: string; message?: string }>;
+  realizeSatb(req: { song?: string; progression: string; bpm?: string; key?: string; name?: string; write?: boolean }): Promise<Satb>;
   bookPage(book: string, page: number): Promise<{ ok: boolean; dataUrl?: string; message?: string }>;
   openBook(book: string): Promise<string>;
   openReader(book: string, page: number): Promise<{ ok: boolean; message?: string }>;
@@ -72,9 +74,17 @@ function demoApi(): StudioApi {
     createSong: async (d) => { const s = { ...structuredClone(song), name: d.title, title: d.title, key: d.key || '', tempo: `${d.bpm || ''} BPM, 4/4`, phase: 'idea', decisions: [], versions: [] }; songs.push(s); return s; },
     addDecision: async (n, agent, text) => { const s = songs.find((x) => x.name === n)!; s.decisions.push({ date: new Date().toISOString().slice(0, 10), agent, text }); return structuredClone(s); },
     addVersion: async (n, v) => { const s = songs.find((x) => x.name === n)!; s.versions.push({ date: new Date().toISOString().slice(0, 10), ...v }); return structuredClone(s); },
-    setProgression: async (n, prog) => { const s = songs.find((x) => x.name === n)!; s.progression = prog; return structuredClone(s); },
+    setProgression: async (n, prog, sec) => {
+      const s = songs.find((x) => x.name === n)!;
+      const list = s.sections ?? (s.sections = [{ section: '', progression: s.progression || '' }]);
+      const hit = list.find((x) => x.section === (sec || ''));
+      if (hit) hit.progression = prog; else list.push({ section: sec || '', progression: prog });
+      if (!sec) s.progression = prog;
+      return structuredClone(s);
+    },
     setCompositionType: async (n, type) => { const s = songs.find((x) => x.name === n)!; s.compositionType = type; return structuredClone(s); },
     exportMidi: async (r) => ({ ok: true, path: `songs/${r.song}/midi/${r.name || 'progression'}.mid`, message: 'Anteprima: nessun file scritto' }),
+    realizeSatb: async () => ({ ok: true, s: 'A4 A4 G#4 A4', a: 'E4 F4 E4 E4', t: 'C4 D4 D4 C4', b: 'A2 D3 E2 A2', files: [] }),
     checkVoices: async () => ({ ok: true, errors: true, report: '[ERRORE] accordo 2: quinte parallele tra Tenore e Basso (accordi 2-3: Do4/Fa3 -> Re4/Sol3)\n\n1 errori, 0 avvisi su 4 accordi.' }),
     bookPage: async () => ({ ok: false, message: 'Anteprima: le pagine dei manuali si vedono solo nell\'app.' }),
     openBook: async () => '',

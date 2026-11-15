@@ -7,6 +7,18 @@ import { analyze as analyzeProg, keyForMidi, BOOKS, chordTones, parseProgression
 import { Piano, Style } from './piano';
 import { suggest, COMPOSITION_TYPES, TECHNIQUES, typeFromText, homeLabel, CompositionType, Technique, Suggestion } from './suggestions';
 
+const NOTE_PC: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+const ITA: Record<string, string> = { do: 'C', re: 'D', mi: 'E', fa: 'F', sol: 'G', la: 'A', si: 'B' };
+/** «C4», «F#3», «Bb2», «Do4», «Sib2» → numero MIDI (C4 = 60). */
+export function noteMidi(tok: string): number | null {
+  let t = tok.trim();
+  const it = t.match(/^(do|re|mi|fa|sol|la|si)([#b]*)(-?\d)$/i);
+  if (it) t = ITA[it[1].toLowerCase()] + it[2] + it[3];
+  const m = t.match(/^([A-Ga-g])(#{1,2}|b{1,2})?(-?\d)$/);
+  if (!m) return null;
+  const acc = !m[2] ? 0 : m[2][0] === '#' ? m[2].length : -m[2].length;
+  return NOTE_PC[m[1].toUpperCase()] + acc + 12 * (+m[3] + 1);
+}
 const render = (text: string) => linkChordLines(linkCitations(mdToHtml(text)), isChordLine);
 
 interface Phase { id: string; label: string; agent: string; hint: string; }
@@ -98,6 +110,7 @@ export class App {
     });
     effect(() => { this.conv(); queueMicrotask(() => { const el = this.thread()?.nativeElement; if (el) el.scrollTop = el.scrollHeight; }); });
     api.onAgentEvent((id, ev) => this.onEvent(id, ev));
+    this.loadMidi();
     this.load();
   }
   private pendingSong = '';
@@ -320,7 +333,47 @@ export class App {
   progBpm = signal('');
   cells = computed(() => analyzeProg(this.prog(), this.progKey(), this.beatsPerBar()));
   beatsPerBar = computed(() => { const m = (this.song()?.tempo || '').match(/(\d+)\s*\/\s*4/); return m ? +m[1] : 4; });
-  progDirty = computed(() => (this.song()?.progression || '') !== this.prog().trim());
+  progDirty = computed(() => (this.sectionTabs().find((t) => t.section === this.section())?.progression || '') !== this.prog().trim());
+
+  // ---------- sezioni (Verse, Chorus, Bridge…) ----------
+  readonly sectionNames = ['Intro', 'Verse', 'Pre-Chorus', 'Chorus', 'Bridge', 'Solo', 'Outro'];
+  section = signal('');
+  private drafts: Record<string, string> = {};
+  sectionTabs = computed(() => {
+    const s = this.song();
+    const tabs = [{ section: '', progression: s?.progression || '' }, ...(s?.sections ?? []).filter((x) => x.section)];
+    const cur = this.section();
+    if (cur && !tabs.some((t) => t.section === cur)) tabs.push({ section: cur, progression: '' });
+    return tabs;
+  });
+  sectionLabel(sec: string) { return sec || 'Principale'; }
+  selectSection(sec: string) {
+    if (sec === this.section()) return;
+    this.drafts[this.section()] = this.prog();
+    this.stopPlay();
+    this.section.set(sec);
+    this.insertAfter.set(-1);
+    this.prog.set(this.drafts[sec] ?? this.sectionTabs().find((t) => t.section === sec)?.progression ?? '');
+    this.harmMsg.set(null);
+  }
+  addSection(name: string) {
+    const n = (name || '').trim();
+    if (!n) return;
+    let sec = n, k = 2;
+    while (this.sectionTabs().some((t) => t.section === sec)) sec = `${n} ${k++}`;
+    this.selectSection(sec);
+  }
+  private fileBase(suffix = '') {
+    const sec = this.section().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    return 'progression' + (sec ? '-' + sec : '') + suffix;
+  }
+
+  // punto di inserimento per gli sviluppi: dopo l'accordo scelto nella griglia, altrimenti in coda
+  insertAfter = signal(-1);
+  insertLabel = computed(() => {
+    const i = this.insertAfter(); const c = this.cells()[i];
+    return i >= 0 && c ? `dopo «${c.name}» (accordo ${i + 1}, b. ${c.bar})` : 'in coda alla progressione';
+  });
   harmMsg = signal<{ ok: boolean; text: string; path?: string } | null>(null);
   voicesOpen = signal(false);
   voices = signal({ s: '', a: '', t: '', b: '' });
@@ -339,6 +392,10 @@ export class App {
     const s = this.song();
     if ((s?.name ?? '') === this.lastSong) return;      // solo al cambio di brano, non a ogni ricarica
     this.lastSong = s?.name ?? '';
+    this.drafts = {};
+    this.section.set('');
+    this.insertAfter.set(-1);
+    this.exercise.set(null);
     this.prog.set(s?.progression || '');
     this.progKey.set(keyForMidi(s?.key || '') || '');
     this.progBpm.set((s?.tempo.match(/(\d+)\s*BPM/i) || [])[1] || '');
@@ -357,7 +414,11 @@ export class App {
 
   async saveProgression() {
     const s = this.song(); if (!s || !this.prog().trim()) return;
-    try { this.replaceSong(await api.setProgression(s.name, this.prog().trim())); this.harmMsg.set({ ok: true, text: 'Progressione salvata nella memoria del brano.' }); }
+    try {
+      this.replaceSong(await api.setProgression(s.name, this.prog().trim(), this.section()));
+      delete this.drafts[this.section()];
+      this.harmMsg.set({ ok: true, text: `Progressione${this.section() ? ' «' + this.section() + '»' : ''} salvata nella memoria del brano.` });
+    }
     catch (e: any) { this.harmMsg.set({ ok: false, text: this.errText(e) }); }
   }
 
@@ -365,9 +426,74 @@ export class App {
     if (!this.prog().trim()) return;
     this.harmMsg.set({ ok: true, text: 'Creo il file MIDI…' });
     const s = this.song();
-    const r = await api.exportMidi({ song: s?.name, progression: this.prog().trim(), bpm: this.progBpm(), key: this.progKey(), name: 'progression' });
+    const r = await api.exportMidi({ song: s?.name, progression: this.prog().trim(), bpm: this.progBpm(), key: this.progKey(), name: this.fileBase() });
     this.harmMsg.set(r.ok ? { ok: true, text: 'MIDI pronto: tracce Melody, Strings, Piano, Electric Bass, Drums.', path: r.path } : { ok: false, text: r.message || 'Esportazione non riuscita' });
     if (r.ok) this.songs.set(await api.listSongs());
+  }
+
+  // ---------- quattro voci: realizzazione automatica ed esercizi ----------
+  satbBusy = signal(false);
+  exercise = signal<{ title: string; chords: { chord: string; numeral: string; keyChange?: string }[]; line: string; solution: { s: string; a: string; t: string; b: string }; ref?: Suggestion['ref'] } | null>(null);
+
+  async realizeSatb() {
+    const prog = this.prog().trim();
+    if (!prog || this.satbBusy()) return;
+    this.satbBusy.set(true);
+    this.harmMsg.set({ ok: true, text: 'Realizzo a quattro voci…' });
+    const s = this.song();
+    const r = await api.realizeSatb({ song: s?.name, progression: prog, key: this.progKey(), bpm: String(this.bpmNum()), name: this.fileBase('-satb'), write: true });
+    this.satbBusy.set(false);
+    if (!r.ok) { this.harmMsg.set({ ok: false, text: r.message || 'Realizzazione non riuscita' }); return; }
+    this.exercise.set(null);
+    this.voices.set({ s: r.s!, a: r.a!, t: r.t!, b: r.b! });
+    this.voicesOpen.set(true);
+    const xml = r.files?.find((f) => /\.musicxml$/i.test(f));
+    this.harmMsg.set({ ok: true, text: 'Realizzazione a quattro voci pronta (Soprano, Alto, Tenor, Bass). Partitura per Dorico:', path: xml });
+    if (s) this.songs.set(await api.listSongs());
+    this.runVoices();
+  }
+
+  async newExercise() {
+    const pool = suggest(this.sugKey(), 'chorale').filter((x) => x.score >= 2 && x.chords.length >= 4 && x.chords.length <= 8);
+    if (!pool.length) return;
+    const pick = pool[Math.floor(Math.random() * pool.length)];
+    this.satbBusy.set(true);
+    const r = await api.realizeSatb({ progression: pick.line, key: this.sugKey(), write: false });
+    this.satbBusy.set(false);
+    if (!r.ok) { this.voiceReport.set({ ok: false, text: r.message || 'Esercizio non disponibile' }); return; }
+    this.exercise.set({ title: pick.title, chords: pick.chords, line: pick.line, solution: { s: r.s!, a: r.a!, t: r.t!, b: r.b! }, ref: pick.ref });
+    this.voices.set({ s: '', a: '', t: '', b: r.b! });
+    this.voiceReport.set({ ok: true, text: `Basso dato in ${this.sugHome()}: scrivi Soprano, Alto e Tenor seguendo i gradi, poi «Controlla».` });
+    this.voicesOpen.set(true);
+  }
+  showSolution() { const e = this.exercise(); if (e) { this.voices.set({ ...e.solution }); this.runVoices(); } }
+  playVoices() {
+    const v = this.voices();
+    const parts = [v.b, v.t, v.a, v.s].map((x) => x.trim().split(/\s+/).filter(Boolean).map(noteMidi));
+    if (parts.some((p) => !p.length || p.some((n) => n === null)) || new Set(parts.map((p) => p.length)).size > 1) {
+      this.voiceReport.set({ ok: false, text: 'Per ascoltare servono quattro voci complete con lo stesso numero di note.' }); return;
+    }
+    if (this.playing() === 'satb') { this.stopPlay(); return; }
+    this.playing.set('satb');
+    this.piano.playVoices(parts as number[][], this.bpmNum(), (i) => { if (i < 0) this.playing.set(''); });
+  }
+
+  /** Note che non appartengono all'accordo previsto dall'esercizio. */
+  private chordReport(): string {
+    const e = this.exercise(); if (!e) return '';
+    const v = this.voices();
+    const parts = [v.s, v.a, v.t, v.b].map((x) => x.trim().split(/\s+/).filter(Boolean));
+    const lines: string[] = [];
+    e.chords.forEach((c, i) => {
+      const ct = chordTones(c.chord); if (!ct) return;
+      const pcs = new Set(ct.intervals.map((x) => (ct.root + x) % 12));
+      const got = parts.map((p) => noteMidi(p[i] || '')).filter((n): n is number => n !== null).map((n) => n % 12);
+      const foreign = got.filter((p) => !pcs.has(p));
+      const missing = [...pcs].filter((p) => !got.includes(p) && ct.intervals.length <= 4 && (p - ct.root + 12) % 12 !== 7);
+      if (foreign.length) lines.push(`[ERRORE] accordo ${i + 1} (${c.chord}, ${c.numeral}): note estranee all'accordo`);
+      else if (missing.length) lines.push(`[AVVISO] accordo ${i + 1} (${c.chord}, ${c.numeral}): manca una nota essenziale (terza o settima)`);
+    });
+    return lines.length ? lines.join('\n') + '\n\n' : 'Tutti gli accordi sono completi e corretti.\n\n';
   }
 
   async runVoices() {
@@ -375,7 +501,8 @@ export class App {
     if (![v.s, v.a, v.t, v.b].every((x) => x.trim())) { this.voiceReport.set({ ok: false, text: 'Compila tutte e quattro le voci.' }); return; }
     this.voiceReport.set({ ok: true, text: 'Controllo…' });
     const r = await api.checkVoices(v);
-    this.voiceReport.set(r.ok ? { ok: true, errors: r.errors, text: r.report || '' } : { ok: false, text: r.message || 'Controllo non riuscito' });
+    const pre = this.chordReport();
+    this.voiceReport.set(r.ok ? { ok: true, errors: r.errors || pre.includes('[ERRORE]'), text: pre + (r.report || '') } : { ok: false, text: r.message || 'Controllo non riuscito' });
   }
 
   askHarmony() {
@@ -442,6 +569,7 @@ export class App {
     });
   }
   previewCell(idx: number) {
+    this.insertAfter.set(idx);
     const list = this.progChords();
     const k = list.findIndex((x) => x.idx === idx);
     if (k < 0) return;
@@ -458,6 +586,45 @@ export class App {
     });
   }
   sugIdx = signal(-1);
+
+  // Uscita: pianoforte interno oppure una porta MIDI (Komplete Kontrol con The Grandeur, BBCSO Piano…)
+  midiOutputs = signal<{ id: string; name: string }[]>([]);
+  soundId = signal('internal');
+  midiError = signal('');
+  private midiAccess: MIDIAccess | null = null;
+  async loadMidi() {
+    if (this.midiAccess || !navigator.requestMIDIAccess) return;
+    try {
+      this.midiAccess = await navigator.requestMIDIAccess({ sysex: false });
+      const refresh = () => {
+        const list = [...this.midiAccess!.outputs.values()].filter((o) => !/GS Wavetable/i.test(o.name || ''))
+          .map((o) => ({ id: o.id, name: o.name || o.id }));
+        this.midiOutputs.set(list);
+        if (this.soundId() !== 'internal' && !list.some((o) => o.id === this.soundId())) this.setSound('internal');
+      };
+      this.midiAccess.onstatechange = refresh;
+      refresh();
+      let saved = ''; try { saved = localStorage.getItem(LS + '.sound') || ''; } catch { /* ignora */ }
+      const hit = this.midiOutputs().find((o) => o.name === saved);
+      if (hit) this.setSound(hit.id);
+    } catch (e: any) { this.midiError.set('MIDI non disponibile: ' + (e?.message || e)); }
+  }
+  setSound(id: string) {
+    this.stopPlay();
+    this.soundId.set(id);
+    const out = id === 'internal' ? null : this.midiAccess?.outputs.get(id) ?? null;
+    this.piano.setMidiOutput(out);
+    try { localStorage.setItem(LS + '.sound', out?.name || ''); } catch { /* ignora */ }
+  }
+  soundName = computed(() => this.midiOutputs().find((o) => o.id === this.soundId())?.name ?? 'Pianoforte interno');
+  /** La porta della tastiera manda le note allo strumento fisico, non al software Komplete Kontrol. */
+  soundHint = computed(() => {
+    const n = this.soundName();
+    if (/^KOMPLETE KONTROL( EXT)? - \d/i.test(n)) return 'Questa porta va alla tastiera Komplete Kontrol, non al programma: per sentire The Grandeur o BBCSO Piano usa una porta virtuale (loopMIDI) attivata come ingresso in Komplete Kontrol.';
+    if (/Komplete Kontrol DAW/i.test(n)) return 'Porta di integrazione DAW della tastiera: non suona lo strumento.';
+    if (/UR816|UR-C/i.test(n)) return 'Uscita MIDI fisica della UR816 (DIN): suona solo se c\'è uno strumento collegato al connettore MIDI OUT.';
+    return n === 'Pianoforte interno' ? '' : 'In Komplete Kontrol: Preferenze → MIDI → attiva questa porta come ingresso, poi carica The Grandeur o BBCSO Piano.';
+  });
   stopPlay() { this.piano.stop(); this.playing.set(''); this.nowIdx.set(-1); this.sugIdx.set(-1); }
 
   // ---------- sviluppi armonici ----------
@@ -483,9 +650,20 @@ export class App {
   }
   addSuggestion(s: Suggestion) {
     const cur = this.prog().trim();
-    this.prog.set(cur ? `${cur} | ${s.line}` : s.line);
+    const at = this.insertAfter();
+    if (at < 0 || at >= this.cells().length - 1) {
+      this.prog.set(cur ? `${cur} | ${s.line}` : s.line);
+    } else {
+      // inserisce dopo l'accordo scelto, tra due separatori di gruppo
+      const toks = cur.replace(/\|/g, ' | ').split(/\s+/).filter(Boolean);
+      let seen = -1, pos = toks.length;
+      for (let k = 0; k < toks.length; k++) if (toks[k] !== '|' && ++seen === at) { pos = k + 1; break; }
+      toks.splice(pos, 0, '|', ...s.line.split(' '), '|');
+      this.prog.set(toks.join(' ').replace(/(\|\s*)+\|/g, '|').replace(/^\|\s*|\s*\|$/g, '').trim());
+    }
     this.harmOpen.set(true);
-    this.harmMsg.set({ ok: true, text: `Aggiunto «${s.title}» in coda alla progressione.` });
+    this.harmMsg.set({ ok: true, text: `Aggiunto «${s.title}» ${this.insertLabel()}.` });
+    this.insertAfter.set(-1);
   }
   replaceWith(s: Suggestion) {
     this.prog.set(s.line);

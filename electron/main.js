@@ -1,5 +1,5 @@
 // Studio Agent - processo principale di Electron
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, session } = require('electron');
 const { pathToFileURL } = require('url');
 const path = require('path');
 const fs = require('fs');
@@ -89,7 +89,7 @@ function runPy(args) {
 }
 function lastLine(t) { return String(t).trim().split(/\r?\n/).filter(Boolean).pop() || ''; }
 
-ipcMain.handle('songs:progression', (_e, song, prog) => songs.setProgression(ROOT, song, prog));
+ipcMain.handle('songs:progression', (_e, song, prog, sec) => songs.setProgression(ROOT, song, prog, sec));
 ipcMain.handle('songs:type', (_e, song, type) => songs.setBriefField(ROOT, song, 'Tipo di composizione', type));
 
 ipcMain.handle('harmony:midi', async (_e, { song, progression, bpm, key, name }) => {
@@ -103,6 +103,23 @@ ipcMain.handle('harmony:midi', async (_e, { song, progression, bpm, key, name })
   const r = await runPy(args);
   if (r.code !== 0) return { ok: false, message: lastLine(r.err) || lastLine(r.out) || 'Esportazione non riuscita' };
   return { ok: true, path: out, message: r.out.trim() };
+});
+
+// Realizzazione a quattro voci (tools/satb.py): voci in JSON e, se richiesto, MusicXML + MIDI in score/
+ipcMain.handle('harmony:satb', async (_e, { song, progression, bpm, key, name, write }) => {
+  const args = [path.join(ROOT, 'tools', 'satb.py'), progression, '--json'];
+  if (key) args.push('--key', key);
+  if (bpm) args.push('--bpm', String(bpm));
+  if (write) {
+    const base = String(name || 'progression-satb').replace(/[^A-Za-z0-9 _-]/g, '').trim() || 'progression-satb';
+    const dir = song ? path.join(ROOT, 'songs', song, 'score') : path.join(ROOT, 'score');
+    fs.mkdirSync(dir, { recursive: true });
+    args.push('-o', path.join(dir, base), '--title', song ? `${song} - ${base}` : base);
+  }
+  const r = await runPy(args);
+  const line = r.out.trim().split(/\r?\n/).reverse().find((l) => l.startsWith('{'));
+  if (r.code !== 0 || !line) return { ok: false, message: lastLine(r.err) || lastLine(r.out) || 'Realizzazione non riuscita' };
+  return { ok: true, ...JSON.parse(line) };
 });
 
 ipcMain.handle('harmony:voices', async (_e, v) => {
@@ -186,6 +203,9 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
   app.whenReady().then(async () => {
+    // Web MIDI per suonare la progressione con Komplete Kontrol o altri strumenti (senza SysEx)
+    session.defaultSession.setPermissionRequestHandler((_wc, perm, cb) => cb(perm === 'midi'));
+    session.defaultSession.setPermissionCheckHandler((_wc, perm) => perm === 'midi');
     if (!ROOT) {
       await dialog.showMessageBox({ type: 'info', title: 'Studio Agent', message: 'Scegli la cartella studio-agent',
         detail: 'Studio Agent usa gli agenti, i brani e gli strumenti che stanno nella tua cartella studio-agent (quella con .claude\\agents). Potrai cambiarla in seguito dal menu dei brani.' });
