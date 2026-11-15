@@ -2,8 +2,12 @@ import { Component, computed, effect, signal, untracked, ChangeDetectionStrategy
 import { FormsModule } from '@angular/forms';
 import { DecimalPipe } from '@angular/common';
 import { api, isDemo, AgentEvent, Song, UsageEntry, Limits } from './api';
-import { mdToHtml, firstSentence, linkCitations } from './md';
-import { analyze as analyzeProg, keyForMidi, BOOKS } from './harmony';
+import { mdToHtml, firstSentence, linkCitations, linkChordLines } from './md';
+import { analyze as analyzeProg, keyForMidi, BOOKS, chordTones, parseProgression, isChordLine, ChordTones } from './harmony';
+import { Piano, Style } from './piano';
+import { suggest, COMPOSITION_TYPES, TECHNIQUES, typeFromText, homeLabel, CompositionType, Technique, Suggestion } from './suggestions';
+
+const render = (text: string) => linkChordLines(linkCitations(mdToHtml(text)), isChordLine);
 
 interface Phase { id: string; label: string; agent: string; hint: string; }
 interface Msg { role: 'user' | 'agent'; agent: string; text: string; html: string; tools: string[]; status: 'running' | 'done' | 'error'; usage?: { input: number; output: number }; durationMs?: number; saved?: boolean; }
@@ -123,6 +127,7 @@ export class App {
   convKey() { return `${this.songName() || '-'}::${this.phase().agent}`; }
 
   selectSong(name: string, setPhase = true) {
+    this.stopPlay();
     this.songName.set(name);
     this.songMenu.set(false);
     const s = this.song();
@@ -153,7 +158,7 @@ export class App {
     const key = this.convKey();
     const prev = this.convs()[key] ?? { msgs: [] };
     const context = s
-      ? `[Contesto dall'app Studio Agent. Brano: "${s.title}". La memoria del brano è in "${s.relPath}": leggila prima di rispondere e aggiornala come indicano le tue istruzioni.${this.measure() ? ` File audio misurato nel pannello Misure: "${this.measureFile()}".` : ''}]\n\n`
+      ? `[Contesto dall'app Studio Agent. Brano: "${s.title}". La memoria del brano è in "${s.relPath}": leggila prima di rispondere e aggiornala come indicano le tue istruzioni. Tipo di composizione: ${this.typeLabel()}.${this.measure() ? ` File audio misurato nel pannello Misure: "${this.measureFile()}".` : ''}]\n\n`
       : `[Contesto dall'app Studio Agent: nessun brano aperto.]\n\n`;
     const user: Msg = { role: 'user', agent, text: body, html: mdToHtml(body), tools: [], status: 'done' };
     const pending: Msg = { role: 'agent', agent, text: '', html: '', tools: [], status: 'running' };
@@ -185,10 +190,10 @@ export class App {
     switch (ev.type) {
       case 'start': this.updateLast((m) => m, ev.sessionId); this.activity.set('Sta leggendo la memoria del brano…'); break;
       case 'tool': this.activity.set(ev.summary); this.updateLast((m) => ({ ...m, tools: [...m.tools, ev.summary] })); break;
-      case 'delta': this.updateLast((m) => { const text = m.text + ev.text; return { ...m, text, html: linkCitations(mdToHtml(text)) }; }); break;
+      case 'delta': this.updateLast((m) => { const text = m.text + ev.text; return { ...m, text, html: render(text) }; }); break;
       case 'blockstart': this.updateLast((m) => (m.text && !m.text.endsWith('\n\n') ? { ...m, text: m.text + '\n\n' } : m)); break;
       case 'limits': this.limits.set({ fiveHour: ev.fiveHour, sevenDay: ev.sevenDay }); break;
-      case 'text': this.updateLast((m) => { const text = m.text ? m.text + '\n\n' + ev.text : ev.text; return { ...m, text, html: linkCitations(mdToHtml(text)) }; }); break;
+      case 'text': this.updateLast((m) => { const text = m.text ? m.text + '\n\n' + ev.text : ev.text; return { ...m, text, html: render(text) }; }); break;
       case 'done':
         if (!ev.ok && this.lastReq?.resume && !this.retried) {
           // la conversazione precedente non si riesce a riprendere: riparte da capo, una volta sola
@@ -200,7 +205,7 @@ export class App {
         }
         this.updateLast((m) => {
           const text = m.text || ev.result || ev.message || '(nessuna risposta)';
-          return { ...m, text, html: linkCitations(mdToHtml(text)), status: ev.ok ? 'done' : 'error', usage: { input: ev.usage.input, output: ev.usage.output }, durationMs: ev.durationMs };
+          return { ...m, text, html: render(text), status: ev.ok ? 'done' : 'error', usage: { input: ev.usage.input, output: ev.usage.output }, durationMs: ev.durationMs };
         }, ev.sessionId);
         this.finish(true);
         break;
@@ -406,11 +411,100 @@ export class App {
   onMdClick(e: MouseEvent) {
     const a = (e.target as HTMLElement).closest('a') as HTMLAnchorElement | null;
     const href = a?.getAttribute('href') || '';
+    const play = href.match(/^#play:(.+)$/);
+    if (play) { e.preventDefault(); this.playLine(decodeURIComponent(play[1]), 'msg:' + play[1]); return; }
     const m = href.match(/^#cite:(\w+):(\d+)$/);
     if (!m) return;
     e.preventDefault();
+    this.rightTab.set('src');
     this.loadPage(m[1], +m[2]);
   }
+
+  // ---------- pianoforte ----------
+  private piano = new Piano();
+  playing = signal('');                 // sorgente in riproduzione: 'prog', id di un suggerimento, 'msg:…'
+  nowIdx = signal(-1);
+  playStyle = signal<Style>('block');
+  loop = signal(false);
+  bpmNum = computed(() => +this.progBpm() || +((this.song()?.tempo.match(/(\d+)\s*BPM/i) || [])[1] || 0) || 90);
+
+  private progChords() {
+    return this.cells().map((c, idx) => ({ idx, ct: c.ok ? chordTones(`${c.name}:${c.beats}`, this.beatsPerBar()) : null }))
+      .filter((x): x is { idx: number; ct: ChordTones } => !!x.ct);
+  }
+  togglePlay() {
+    if (this.playing() === 'prog') { this.stopPlay(); return; }
+    const list = this.progChords();
+    if (!list.length) return;
+    this.playing.set('prog');
+    this.piano.play(list.map((x) => x.ct), { bpm: this.bpmNum(), style: this.playStyle(), loop: this.loop() }, (i) => {
+      if (i < 0) { this.playing.set(''); this.nowIdx.set(-1); } else this.nowIdx.set(list[i].idx);
+    });
+  }
+  previewCell(idx: number) {
+    const list = this.progChords();
+    const k = list.findIndex((x) => x.idx === idx);
+    if (k < 0) return;
+    this.piano.chord(list[k].ct, list[k - 1]?.ct);
+  }
+  playLine(line: string, source: string) {
+    if (this.playing() === source) { this.stopPlay(); return; }
+    const chords = parseProgression(line, this.beatsPerBar());
+    if (!chords.length) return;
+    this.playing.set(source);
+    this.nowIdx.set(-1);
+    this.piano.play(chords, { bpm: this.bpmNum(), style: this.playStyle(), loop: false }, (i) => {
+      if (i < 0) { this.playing.set(''); this.sugIdx.set(-1); } else this.sugIdx.set(i);
+    });
+  }
+  sugIdx = signal(-1);
+  stopPlay() { this.piano.stop(); this.playing.set(''); this.nowIdx.set(-1); this.sugIdx.set(-1); }
+
+  // ---------- sviluppi armonici ----------
+  readonly compTypes = COMPOSITION_TYPES;
+  readonly techniques = Object.entries(TECHNIQUES) as [Technique, string][];
+  rightTab = signal<'dev' | 'src'>('dev');
+  techFilter = signal<Technique | ''>('');
+  private typeOverride = signal<CompositionType | null>(null);
+  compType = computed<CompositionType>(() => this.typeOverride() ?? typeFromText(this.song()?.compositionType || ''));
+  typeLabel = computed(() => COMPOSITION_TYPES.find((c) => c.id === this.compType())!.label);
+  sugKey = computed(() => this.progKey() || keyForMidi(this.song()?.key || '') || 'C');
+  sugHome = computed(() => homeLabel(this.sugKey()));
+  suggestions = computed(() => suggest(this.sugKey(), this.compType(), this.techFilter() || undefined));
+  techLabel(t: Technique) { return TECHNIQUES[t]; }
+  numerals(s: Suggestion) { return s.chords.map((c) => c.numeral).join(' '); }
+
+  async setType(t: CompositionType) {
+    this.typeOverride.set(t);
+    const s = this.song();
+    if (!s) return;
+    try { this.replaceSong(await api.setCompositionType(s.name, COMPOSITION_TYPES.find((c) => c.id === t)!.label)); this.typeOverride.set(null); }
+    catch (e: any) { this.harmMsg.set({ ok: false, text: this.errText(e) }); }
+  }
+  addSuggestion(s: Suggestion) {
+    const cur = this.prog().trim();
+    this.prog.set(cur ? `${cur} | ${s.line}` : s.line);
+    this.harmOpen.set(true);
+    this.harmMsg.set({ ok: true, text: `Aggiunto «${s.title}» in coda alla progressione.` });
+  }
+  replaceWith(s: Suggestion) {
+    this.prog.set(s.line);
+    this.harmOpen.set(true);
+    this.harmMsg.set({ ok: true, text: `La progressione ora è «${s.title}». «Salva nella memoria» per tenerla.` });
+  }
+  askSuggestion(s: Suggestion) {
+    const mods = s.keyChanges.length ? ` Modula a: ${s.keyChanges.join(', ')}.` : '';
+    this.send(`Valuta lo sviluppo «${s.title}» per questo brano (${this.typeLabel()}): \`${s.line}\` (gradi in ${this.sugHome()}: ${this.numerals(s)}).${mods} `
+      + `Spiega condotta delle parti, preparazione e risoluzione delle dissonanze (settime, ritardi, alterazioni) e dove inserirlo rispetto alla progressione attuale${this.prog().trim() ? ' `' + this.prog().trim() + '`' : ''}. `
+      + `Cita il De Ninno e scrivi la progressione risultante tra backtick con simboli inglesi.`, `Sviluppo: ${s.title}`);
+  }
+  askAgentSuggestions() {
+    const p = this.prog().trim();
+    this.send(`Proponi tre possibili sviluppi armonici${p ? ` per la progressione \`${p}\`` : ''} in ${this.sugHome()}, adatti a: ${this.typeLabel()}. `
+      + `Usa tecniche avanzate (modulazioni con accordo perno o enarmoniche, cadenze evitate, risoluzioni delle settime, ritardi, sesta napoletana e seste aumentate, pedali) scelte in base al tipo di composizione. `
+      + `Per ciascuno: la progressione tra backtick con simboli inglesi (es. \`Dm7/F G7 Am\`), i gradi, la condotta delle parti e la pagina del De Ninno.`, 'Sviluppi armonici dall\'agente');
+  }
+  openRef(s: Suggestion) { if (s.ref) { this.rightTab.set('src'); this.loadPage(s.ref.book, s.ref.page); } }
 
   private errText(e: any) { return String(e?.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''); }
 

@@ -161,3 +161,35 @@ select { background: var(--bg); border: 1px solid var(--line2); border-radius: 6
 
 .rootrow { display: flex; align-items: center; gap: 10px; padding: 8px 10px 4px; border-top: 1px solid var(--line); margin-top: 4px; }
 .rootrow .clip { flex: 1; }
+
+/* Pianoforte */
+.player { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.play-btn { display: inline-flex; align-items: center; gap: 8px; }
+.seg.small-seg { padding: 3px; } .seg.small-seg button { min-height: 32px; padding: 0 12px; font-size: 13px; }
+.check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text2); } .check input { accent-color: var(--accent); width: 16px; height: 16px; }
+button.cell { border: 1px solid transparent; text-align: left; color: var(--text); cursor: pointer; transition: background .1s, border-color .1s; }
+button.cell:hover:not(:disabled) { border-color: var(--line2); } button.cell:disabled { cursor: default; }
+.cell.now { background: var(--accent-bg); border-color: var(--accent); } .cell.now .cn { color: var(--accent); }
+.md a.play { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; margin-right: 4px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-size: 10px; text-decoration: none; vertical-align: 1px; }
+
+/* Sviluppi armonici */
+.tabs { display: flex; gap: 4px; } .tabs button { min-height: 34px; padding: 0 14px; background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--text2); font: 600 12px var(--cond); letter-spacing: .1em; text-transform: uppercase; }
+.tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
+.devhead { display: flex; flex-direction: column; gap: 10px; } .devhead label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--dim); flex: none; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { min-height: 30px; padding: 0 11px; border-radius: 15px; border: 1px solid var(--line2); background: transparent; color: var(--text2); font-size: 12px; }
+.chip.on { background: var(--accent-bg); border-color: var(--accent); color: var(--text); }
+.sugs { display: flex; flex-direction: column; gap: 10px; }
+.sug { padding: 12px 14px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; display: flex; flex-direction: column; gap: 8px; }
+.sug.playing { border-color: var(--accent); }
+.sug header { display: flex; align-items: flex-start; gap: 10px; } .sug h3 { flex: 1; font-size: 14px; font-weight: 600; line-height: 1.35; }
+.fit { display: inline-flex; gap: 3px; padding-top: 5px; } .fit i { width: 6px; height: 6px; border-radius: 50%; background: #3a3d43; } .fit i.on { background: var(--accent); }
+.tag2 { align-self: flex-start; font: 600 10px var(--cond); letter-spacing: .1em; text-transform: uppercase; color: var(--dim); }
+.chords { display: flex; flex-wrap: wrap; gap: 4px; align-items: stretch; }
+.ch { display: flex; flex-direction: column; padding: 4px 7px; border-radius: 4px; background: var(--bg2); min-width: 44px; }
+.ch b { font-size: 14px; } .ch small { font-size: 11px; color: var(--dim); }
+.ch.now { background: var(--accent-bg); outline: 1px solid var(--accent); }
+.kc { align-self: center; font-size: 11px; color: var(--accent); padding: 0 2px; }
+.how { font-size: 13px; line-height: 1.5; color: var(--text2); }
+.sug .acts .btn { min-height: 34px; padding: 0 11px; font-size: 13px; }
+.sug h3 { margin: 0; font: 600 14px/1.35 var(--sans); letter-spacing: 0; text-transform: none; color: var(--text); }

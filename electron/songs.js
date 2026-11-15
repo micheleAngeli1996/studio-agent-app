@@ -44,6 +44,7 @@ function parseSong(root, name) {
     tempo: field(brief, 'Tempo'),
     phase: field(brief, 'Fase attuale').toLowerCase(),
     goal: field(brief, 'Obiettivo'),
+    compositionType: field(brief, 'Tipo di composizione'),
     progression: progressionOf(md),
     tracks: table(section(md, 'Tracce').body).map((r) => ({ name: r[0], role: r[1] || '', instrument: r[2] || '' })).filter((t) => t.name),
     decisions: section(md, 'Decisioni').body.filter((l) => l.trim().startsWith('- ')).map((l) => {
@@ -128,4 +129,24 @@ function setProgression(root, name, prog) {
   return parseSong(root, name);
 }
 
-module.exports = { listSongs, parseSong, addDecision, addVersion, createSong, setProgression };
+/** Imposta un campo del brief (es. "Tipo di composizione"), aggiungendolo dopo l'ultima riga del brief se manca. */
+function setBriefField(root, name, label, value) {
+  const file = path.join(root, 'songs', name, 'SONG.md');
+  const clean = String(value).replace(/[\r\n`]/g, ' ').trim();
+  const md = fs.readFileSync(file, 'utf8');
+  const lines = md.split(/\r?\n/);
+  const s = section(md, 'Brief');
+  if (s.start < 0) throw new Error('Sezione "Brief" non trovata');
+  const line = `- ${label}: ${clean}`;
+  const i = lines.findIndex((l, k) => k > s.start && k < s.end && l.trim().toLowerCase().startsWith('- ' + label.toLowerCase()));
+  if (i >= 0) lines[i] = line;
+  else {
+    let last = s.start;
+    for (let k = s.start + 1; k < s.end; k++) if (lines[k].trim().startsWith('- ')) last = k;
+    lines.splice(last + 1, 0, line);
+  }
+  fs.writeFileSync(file, lines.join('\n'), 'utf8');
+  return parseSong(root, name);
+}
+
+module.exports = { listSongs, parseSong, addDecision, addVersion, createSong, setProgression, setBriefField };

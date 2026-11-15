@@ -143,12 +143,27 @@
                 <label>BPM<input class="mono short" [ngModel]="progBpm()" (ngModelChange)="progBpm.set($event)" inputmode="numeric"></label>
               </div>
               @if (cells().length) {
+                <div class="player" role="group" aria-label="Anteprima al pianoforte">
+                  <button class="btn primary play-btn" (click)="togglePlay()" [attr.aria-pressed]="playing() === 'prog'">
+                    @if (playing() === 'prog') {
+                      <svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14"><rect x="2" y="2" width="10" height="10" rx="1.5" fill="currentColor"/></svg> Ferma
+                    } @else {
+                      <svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14"><path d="M3 1.8v10.4L12 7z" fill="currentColor"/></svg> Ascolta al pianoforte
+                    }
+                  </button>
+                  <div class="seg small-seg" role="radiogroup" aria-label="Modo di suonare">
+                    <button [class.on]="playStyle() === 'block'" role="radio" [attr.aria-checked]="playStyle() === 'block'" (click)="playStyle.set('block')">Accordi</button>
+                    <button [class.on]="playStyle() === 'arp'" role="radio" [attr.aria-checked]="playStyle() === 'arp'" (click)="playStyle.set('arp')">Arpeggio</button>
+                  </div>
+                  <label class="check"><input type="checkbox" [ngModel]="loop()" (ngModelChange)="loop.set($event)"> Ripeti</label>
+                  <span class="dim small mono">{{ bpmNum() }} BPM · clic su un accordo per sentirlo</span>
+                </div>
                 <div class="grid" role="list">
                   @for (c of cells(); track $index) {
-                    <div class="cell" role="listitem" [class.bad]="!c.ok">
+                    <button type="button" class="cell" role="listitem" [class.bad]="!c.ok" [class.now]="nowIdx() === $index" (click)="previewCell($index)" [disabled]="!c.ok" [attr.aria-label]="'Suona ' + c.name">
                       <span class="mono cn">{{ c.name }}</span>
                       <span class="mono dim small">{{ c.ok ? (c.numeral || '—') : 'non riconosciuto' }}@if (c.beats !== beatsPerBar()) { · {{ c.beats }}t }</span>
-                    </div>
+                    </button>
                   }
                 </div>
               }
@@ -214,11 +229,55 @@
 
       @if (showSource()) {
         @if (rightOpen()) {
-          <aside class="panel rightp" aria-label="Fonte">
+          <aside class="panel rightp" aria-label="Sviluppi e fonte">
             <div class="phead">
-              <button class="icon" aria-label="Comprimi il pannello Fonte" aria-expanded="true" (click)="rightOpen.set(false)"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3l5 5-5 5"/></svg></button>
-              <h2>Fonte</h2>
+              <button class="icon" aria-label="Comprimi il pannello" aria-expanded="true" (click)="rightOpen.set(false)"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3l5 5-5 5"/></svg></button>
+              @if (phaseId() === 'armonia') {
+                <div class="tabs" role="tablist">
+                  <button role="tab" [class.on]="rightTab() === 'dev'" [attr.aria-selected]="rightTab() === 'dev'" (click)="rightTab.set('dev')">Sviluppi</button>
+                  <button role="tab" [class.on]="rightTab() === 'src'" [attr.aria-selected]="rightTab() === 'src'" (click)="rightTab.set('src')">Fonte</button>
+                </div>
+              } @else { <h2>Fonte</h2> }
             </div>
+            @if (phaseId() === 'armonia' && rightTab() === 'dev') {
+              <div class="devhead">
+                <label class="grow">Tipo di composizione
+                  <select [ngModel]="compType()" (ngModelChange)="setType($event)">
+                    @for (t of compTypes; track t.id) { <option [value]="t.id">{{ t.label }}</option> }
+                  </select></label>
+                <p class="dim small">Modelli realizzati in <strong>{{ sugHome() }}</strong>, ordinati per quanto sono idiomatici in «{{ typeLabel() }}».</p>
+                <div class="chips" role="group" aria-label="Filtra per tecnica">
+                  <button class="chip" [class.on]="!techFilter()" (click)="techFilter.set('')">Tutte</button>
+                  @for (t of techniques; track t[0]) { <button class="chip" [class.on]="techFilter() === t[0]" (click)="techFilter.set(t[0])">{{ t[1] }}</button> }
+                </div>
+                <button class="btn" (click)="askAgentSuggestions()" [disabled]="!!busyId()">Chiedi sviluppi su misura all'agente</button>
+              </div>
+              <div class="sugs">
+                @for (sg of suggestions(); track sg.id) {
+                  <article class="sug" [class.playing]="playing() === sg.id">
+                    <header>
+                      <h3>{{ sg.title }}</h3>
+                      <span class="fit" [attr.title]="'Adatto a ' + typeLabel()">@for (d of [1,2,3]; track d) {<i [class.on]="sg.score >= d"></i>}</span>
+                    </header>
+                    <span class="tag2">{{ techLabel(sg.technique) }}</span>
+                    <div class="chords">
+                      @for (c of sg.chords; track $index) {
+                        @if (c.keyChange) { <span class="kc mono" title="Nuova tonalità">→ {{ c.keyChange }}</span> }
+                        <span class="ch" [class.now]="playing() === sg.id && sugIdx() === $index"><b class="mono">{{ c.chord }}</b><small class="mono">{{ c.numeral }}</small></span>
+                      }
+                    </div>
+                    <p class="how">{{ sg.how }}</p>
+                    <div class="acts">
+                      <button class="btn primary" (click)="playLine(sg.line, sg.id)">{{ playing() === sg.id ? 'Ferma' : 'Ascolta' }}</button>
+                      <button class="btn" (click)="addSuggestion(sg)">Aggiungi</button>
+                      <button class="btn" (click)="replaceWith(sg)">Sostituisci</button>
+                      <button class="btn" (click)="askSuggestion(sg)" [disabled]="!!busyId()">Chiedi all'agente</button>
+                      @if (sg.ref) { <button class="link small" (click)="openRef(sg)">De Ninno {{ sg.ref.book === 'armonia2' ? 'vol. II' : 'vol. I' }}, p. {{ sg.ref.page }} · {{ sg.ref.label }}</button> }
+                    </div>
+                  </article>
+                } @empty { <p class="dim">Nessun modello per questo filtro.</p> }
+              </div>
+            } @else {
             <form class="bookform" (ngSubmit)="loadPage()">
               <label class="grow">Manuale
                 <select name="book" [ngModel]="book()" (ngModelChange)="book.set($event)">
@@ -239,11 +298,12 @@
               <button class="btn primary" (click)="openReader()">Leggi nel lettore PDF</button>
               <button class="btn ghost2" (click)="openBookPdf()">Apri con il lettore di sistema</button>
             </div>
+            }
           </aside>
         } @else {
           <div class="rail rightr">
-            <button class="icon solid" aria-label="Espandi il pannello Fonte" aria-expanded="false" (click)="rightOpen.set(true)"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3L5 8l5 5"/></svg></button>
-            <span class="vert">Fonte · {{ bookLabel(book()) }} · p. {{ bookPageNo() }}</span>
+            <button class="icon solid" aria-label="Espandi il pannello" aria-expanded="false" (click)="rightOpen.set(true)"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3L5 8l5 5"/></svg></button>
+            <span class="vert">@if (phaseId() === 'armonia') { Sviluppi · {{ typeLabel() }} · } Fonte · {{ bookLabel(book()) }} · p. {{ bookPageNo() }}</span>
           </div>
         }
       } @else {

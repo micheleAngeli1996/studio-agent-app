@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('studio', {
   addDecision: (song, agent, text) => ipcRenderer.invoke('songs:decision', song, agent, text),
   addVersion: (song, v) => ipcRenderer.invoke('songs:version', song, v),
   setProgression: (song, prog) => ipcRenderer.invoke('songs:progression', song, prog),
+  setCompositionType: (song, type) => ipcRenderer.invoke('songs:type', song, type),
   exportMidi: (req) => ipcRenderer.invoke('harmony:midi', req),
   checkVoices: (v) => ipcRenderer.invoke('harmony:voices', v),
   bookPage: (book, page) => ipcRenderer.invoke('book:page', book, page),

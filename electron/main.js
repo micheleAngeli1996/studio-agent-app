@@ -90,6 +90,7 @@ function runPy(args) {
 function lastLine(t) { return String(t).trim().split(/\r?\n/).filter(Boolean).pop() || ''; }
 
 ipcMain.handle('songs:progression', (_e, song, prog) => songs.setProgression(ROOT, song, prog));
+ipcMain.handle('songs:type', (_e, song, type) => songs.setBriefField(ROOT, song, 'Tipo di composizione', type));
 
 ipcMain.handle('harmony:midi', async (_e, { song, progression, bpm, key, name }) => {
   const base = String(name || 'progression').replace(/[^A-Za-z0-9 _-]/g, '').trim() || 'progression';

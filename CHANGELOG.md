@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0 — 2026-11-15
+
+### Aggiunto
+- **Pianoforte nella sezione Armonia**: ascolto della progressione con un pianoforte sintetizzato (nessun campione da scaricare), condotta delle parti automatica (basso nell'ottava 2–3, voci superiori con il minimo movimento), modo Accordi o Arpeggio, ripetizione, tempo dai BPM del brano, evidenziazione dell'accordo che suona; clic su un accordo per sentirlo da solo.
+- **Righe di accordi ascoltabili nelle risposte**: le progressioni che l'agente scrive tra backtick (`Dm7/F G7 Am`) hanno un pulsante ▶.
+- **Sviluppi armonici**: nuova scheda «Sviluppi» nel pannello destro con modelli realizzati nella tonalità del brano (cadenza evitata, 6/4 cadenzale, cadenza frigia, terza piccarda, catene di dominanti secondarie, progressioni di settime, 7ª diminuita, ritardo 4-3, pedale, modulazioni per accordo comune, salto di tono, progressione modulante, modulazione enarmonica, mediante cromatiche, sesta napoletana, seste aumentate, sostituzione di tritono, backdoor, prestito modale), con gradi, cambi di tonalità, spiegazione della condotta delle parti e pagina del De Ninno. Pulsanti Ascolta, Aggiungi, Sostituisci, Chiedi all'agente; filtro per tecnica; «Chiedi sviluppi su misura all'agente».
+- **Tipo di composizione** del brano (Brano, Ballata, Sinfonia / orchestrale, Colonna sonora, Corale / esercizio, Jazz), salvato nel brief di SONG.md e passato agli agenti: ordina i suggerimenti secondo quanto sono idiomatici.
+
 ## 0.2.0 – 2026-11-13
 - Prima versione installabile su Windows (installer NSIS) con aggiornamento automatico dalle Releases di GitHub.
 - La cartella `studio-agent` si sceglie al primo avvio e si cambia dal menu dei brani; impostazioni, consumi e limiti stanno nella cartella utente dell'app.

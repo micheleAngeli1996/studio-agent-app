@@ -1,0 +1,175 @@
+// Pianoforte sintetizzato con Web Audio: nessun campione da scaricare, condotta delle parti automatica.
+import { ChordTones } from './harmony';
+
+export type Style = 'block' | 'arp';
+export interface PlayOptions { bpm: number; style: Style; loop: boolean; }
+
+/** Disposizione: basso nell'ottava 2–3, tre/quattro voci superiori tra G3 e G5 con il minimo movimento. */
+export function voiceLead(chords: ChordTones[]): { bass: number; upper: number[] }[] {
+  const out: { bass: number; upper: number[] }[] = [];
+  let prevBass = 43;
+  let prev: number[] | null = null;
+  for (const c of chords) {
+    let pcs = c.intervals.map((i) => (c.root + i) % 12);
+    if (pcs.length >= 5) pcs = pcs.filter((_, i) => c.intervals[i] !== 7);         // nelle none si omette la 5ª
+    let upperPcs = pcs.length >= 4 ? pcs.filter((p) => p !== c.bass) : pcs;        // nelle settime non raddoppiare il basso
+    if (upperPcs.length === 0) upperPcs = pcs;
+    upperPcs = [...new Set(upperPcs)];
+    // basso: l'ottava più vicina al basso precedente, tra C2 e E3
+    let bass = 36 + c.bass;
+    if (bass > 52) bass -= 12;
+    if (Math.abs(bass + 12 - prevBass) < Math.abs(bass - prevBass) && bass + 12 <= 52) bass += 12;
+    if (Math.abs(bass - 12 - prevBass) < Math.abs(bass - prevBass) && bass - 12 >= 36) bass -= 12;
+    // voci superiori: tutte le combinazioni di ottava nell'ambito, scelta a costo minimo
+    const options = upperPcs.map((p) => [55, 67, 79].map((o) => o + ((p - o % 12 + 12) % 12)).filter((n) => n >= 55 && n <= 79));
+    let best: number[] = [];
+    let bestCost = Infinity;
+    const rec = (i: number, acc: number[]) => {
+      if (i === options.length) {
+        const v = [...acc].sort((a, b) => a - b);
+        const spread = v[v.length - 1] - v[0];
+        if (spread > 15 || v[0] <= bass + 2) return;
+        let cost: number;
+        if (prev && prev.length === v.length) cost = v.reduce((s, n, k) => s + Math.abs(n - prev![k]), 0);
+        else { const center = prev ? prev.reduce((a, b) => a + b, 0) / prev.length : 66; cost = Math.abs(v.reduce((a, b) => a + b, 0) / v.length - center) * v.length; }
+        cost += spread * 0.15 + Math.abs(v.reduce((a, b) => a + b, 0) / v.length - 66) * 0.25; // posizioni strette, registro centrale
+        if (cost < bestCost) { bestCost = cost; best = v; }
+        return;
+      }
+      for (const n of options[i]) rec(i + 1, [...acc, n]);
+    };
+    rec(0, []);
+    if (!best.length) best = upperPcs.map((p) => 60 + p).sort((a, b) => a - b);
+    out.push({ bass, upper: best });
+    prev = best;
+    prevBass = bass;
+  }
+  return out;
+}
+
+export class Piano {
+  private ctx: AudioContext | null = null;
+  private out!: GainNode;
+  private wave!: PeriodicWave;
+  private voices: { osc: OscillatorNode[]; gain: GainNode }[] = [];
+  private timers: number[] = [];
+  private session = 0;
+
+  private init() {
+    if (this.ctx) { if (this.ctx.state === 'suspended') this.ctx.resume(); return; }
+    const ctx = new AudioContext();
+    this.ctx = ctx;
+    const master = ctx.createGain();
+    master.gain.value = 0.55;
+    const comp = ctx.createDynamicsCompressor();
+    comp.threshold.value = -14; comp.ratio.value = 3;
+    // riverbero corto generato (rumore con decadimento esponenziale)
+    const len = Math.floor(ctx.sampleRate * 1.8);
+    const ir = ctx.createBuffer(2, len, ctx.sampleRate);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = ir.getChannelData(ch);
+      for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 3.2);
+    }
+    const verb = ctx.createConvolver(); verb.buffer = ir;
+    const wet = ctx.createGain(); wet.gain.value = 0.16;
+    this.out = ctx.createGain();
+    this.out.connect(master);
+    this.out.connect(verb); verb.connect(wet); wet.connect(master);
+    master.connect(comp); comp.connect(ctx.destination);
+    // timbro: armoniche con ampiezza decrescente (corda percossa, il martelletto attenua le armoniche pari alte)
+    const n = 12;
+    const real = new Float32Array(n + 1), imag = new Float32Array(n + 1);
+    for (let k = 1; k <= n; k++) imag[k] = (1 / Math.pow(k, 1.6)) * (k % 7 === 0 ? 0.2 : 1);
+    this.wave = ctx.createPeriodicWave(real, imag);
+  }
+
+  private note(midi: number, when: number, dur: number, vel: number) {
+    const ctx = this.ctx!;
+    const f = 440 * Math.pow(2, (midi - 69) / 12);
+    const gain = ctx.createGain();
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(Math.min(16000, f * (3 + vel * 9)), when);
+    lp.frequency.exponentialRampToValueAtTime(Math.max(f * 1.5, 400), when + 1.2);  // il suono si scurisce mentre decade
+    const oscs = [0, 4].map((cents) => {
+      const o = ctx.createOscillator();
+      o.setPeriodicWave(this.wave);
+      o.frequency.value = f;
+      o.detune.value = cents * (midi > 60 ? 1 : 0.5);                                  // leggero battimento tra corde
+      o.connect(lp);
+      return o;
+    });
+    lp.connect(gain);
+    gain.connect(this.out);
+    const peak = 0.16 * vel * (midi < 48 ? 1.25 : 1);
+    const decay = 0.6 + (96 - midi) / 30;                                              // note gravi più lunghe
+    gain.gain.setValueAtTime(0, when);
+    gain.gain.linearRampToValueAtTime(peak, when + 0.006);
+    gain.gain.setTargetAtTime(peak * 0.25, when + 0.006, decay * 0.35);
+    const end = when + dur;
+    gain.gain.setTargetAtTime(0, end, 0.12);
+    oscs.forEach((o) => { o.start(when); o.stop(end + 0.8); });
+    const v = { osc: oscs, gain };
+    this.voices.push(v);
+    oscs[0].onended = () => { this.voices = this.voices.filter((x) => x !== v); gain.disconnect(); };
+  }
+
+  /** Suona un accordo singolo (anteprima al clic). */
+  chord(c: ChordTones, prev?: ChordTones) {
+    this.init();
+    const vl = voiceLead(prev ? [prev, c] : [c]);
+    const v = vl[vl.length - 1];
+    const t = this.ctx!.currentTime + 0.03;
+    this.note(v.bass, t, 1.6, 0.8);
+    v.upper.forEach((n, i) => this.note(n, t + i * 0.008, 1.6, 0.62));
+  }
+
+  /** Suona la progressione; onStep riceve l'indice dell'accordo che sta suonando, -1 alla fine. */
+  play(chords: ChordTones[], opt: PlayOptions, onStep: (i: number) => void) {
+    this.stop();
+    if (!chords.length) return;
+    this.init();
+    const session = ++this.session;
+    const beat = 60 / Math.max(30, Math.min(240, opt.bpm || 90));
+    const vl = voiceLead(chords);
+    const run = (start: number) => {
+      let t = start;
+      chords.forEach((c, i) => {
+        const v = vl[i];
+        const len = c.beats * beat;
+        if (opt.style === 'block') {
+          this.note(v.bass, t, len * 0.96, 0.78);
+          v.upper.forEach((n, k) => this.note(n, t + k * 0.01, len * 0.94, 0.58));
+        } else {
+          // arpeggio in crome: basso, poi le voci superiori su e giù
+          const seq = [...v.upper, ...v.upper.slice(1, -1).reverse()];
+          const steps = Math.max(1, Math.round(c.beats * 2));
+          this.note(v.bass, t, len * 0.98, 0.78);
+          for (let s = 1; s < steps; s++) this.note(seq[(s - 1) % seq.length], t + s * beat / 2, Math.min(len - s * beat / 2, beat * 1.5), 0.5);
+        }
+        const delay = (t - this.ctx!.currentTime) * 1000;
+        this.timers.push(window.setTimeout(() => session === this.session && onStep(i), Math.max(0, delay)));
+        t += len;
+      });
+      const endDelay = (t - this.ctx!.currentTime) * 1000;
+      this.timers.push(window.setTimeout(() => {
+        if (session !== this.session) return;
+        if (opt.loop) run(this.ctx!.currentTime + 0.02); else onStep(-1);
+      }, Math.max(0, endDelay - 30)));
+    };
+    run(this.ctx!.currentTime + 0.08);
+  }
+
+  stop() {
+    this.session++;
+    this.timers.forEach((t) => clearTimeout(t));
+    this.timers = [];
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    for (const v of this.voices) {
+      v.gain.gain.cancelScheduledValues(now);
+      v.gain.gain.setTargetAtTime(0, now, 0.05);
+      v.osc.forEach((o) => { try { o.stop(now + 0.3); } catch { /* già fermato */ } });
+    }
+  }
+}

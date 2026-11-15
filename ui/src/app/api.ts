@@ -4,7 +4,7 @@ export interface MixVersion { date: string; file: string; lufs: string; truePeak
 export interface SongFile { name: string; kind: string; path: string; }
 export interface Song {
   name: string; title: string; path: string; relPath: string; key: string; tempo: string; phase: string; goal: string;
-  progression?: string; tracks: Track[]; decisions: Decision[]; versions: MixVersion[]; files: SongFile[];
+  progression?: string; compositionType?: string; tracks: Track[]; decisions: Decision[]; versions: MixVersion[]; files: SongFile[];
 }
 export interface UsageEntry {
   ts: string; agent: string; song: string; phase: string; request: string; input: number; output: number;
@@ -33,6 +33,7 @@ export interface StudioApi {
   addDecision(song: string, agent: string, text: string): Promise<Song>;
   addVersion(song: string, v: { file: string; lufs: string; truePeak: string; note: string }): Promise<Song>;
   setProgression(song: string, prog: string): Promise<Song>;
+  setCompositionType(song: string, type: string): Promise<Song>;
   exportMidi(req: { song?: string; progression: string; bpm?: string; key?: string; name?: string }): Promise<{ ok: boolean; path?: string; message?: string }>;
   checkVoices(v: { s: string; a: string; t: string; b: string }): Promise<{ ok: boolean; errors?: boolean; report?: string; message?: string }>;
   bookPage(book: string, page: number): Promise<{ ok: boolean; dataUrl?: string; message?: string }>;
@@ -72,6 +73,7 @@ function demoApi(): StudioApi {
     addDecision: async (n, agent, text) => { const s = songs.find((x) => x.name === n)!; s.decisions.push({ date: new Date().toISOString().slice(0, 10), agent, text }); return structuredClone(s); },
     addVersion: async (n, v) => { const s = songs.find((x) => x.name === n)!; s.versions.push({ date: new Date().toISOString().slice(0, 10), ...v }); return structuredClone(s); },
     setProgression: async (n, prog) => { const s = songs.find((x) => x.name === n)!; s.progression = prog; return structuredClone(s); },
+    setCompositionType: async (n, type) => { const s = songs.find((x) => x.name === n)!; s.compositionType = type; return structuredClone(s); },
     exportMidi: async (r) => ({ ok: true, path: `songs/${r.song}/midi/${r.name || 'progression'}.mid`, message: 'Anteprima: nessun file scritto' }),
     checkVoices: async () => ({ ok: true, errors: true, report: '[ERRORE] accordo 2: quinte parallele tra Tenore e Basso (accordi 2-3: Do4/Fa3 -> Re4/Sol3)\n\n1 errori, 0 avvisi su 4 accordi.' }),
     bookPage: async () => ({ ok: false, message: 'Anteprima: le pagine dei manuali si vedono solo nell\'app.' }),

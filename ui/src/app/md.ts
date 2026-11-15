@@ -62,6 +62,15 @@ export function linkCitations(html: string): string {
   });
 }
 
+// Righe di accordi in `codice` -> pulsante che le fa suonare al pianoforte (#play:<accordi>)
+export function linkChordLines(html: string, isChordLine: (t: string) => boolean): string {
+  return html.replace(/<code>([^<]+)<\/code>/g, (all, inner: string) => {
+    const text = inner.replace(/&amp;/g, '&').trim();
+    if (!isChordLine(text)) return all;
+    return `<a class="play" href="#play:${encodeURIComponent(text)}" title="Ascolta al pianoforte">▶</a>${all}`;
+  });
+}
+
 export function firstSentence(md: string): string {
   const t = md.replace(/[#*`>|]/g, '').split('\n').map((x) => x.trim()).find((x) => x.length > 8) || '';
   const m = t.match(/^(.{20,180}?[.!?])(\s|$)/);

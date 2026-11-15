@@ -1,6 +1,11 @@
 // Analisi leggera di una progressione: accordi, durate e gradi rispetto alla tonalità indicata.
 const NOTE: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
-const QUAL = ['', 'm', '7', 'maj7', 'm7', 'dim', 'dim7', 'm7b5', 'aug', 'sus4', 'sus2', '6', 'm6', '9', 'add9', 'm9', 'mmaj7'];
+export const INTERVALS: Record<string, number[]> = {
+  '': [0, 4, 7], m: [0, 3, 7], '7': [0, 4, 7, 10], maj7: [0, 4, 7, 11], m7: [0, 3, 7, 10], dim: [0, 3, 6], dim7: [0, 3, 6, 9],
+  m7b5: [0, 3, 6, 10], aug: [0, 4, 8], sus4: [0, 5, 7], sus2: [0, 2, 7], '6': [0, 4, 7, 9], m6: [0, 3, 7, 9], '9': [0, 4, 7, 10, 14],
+  add9: [0, 4, 7, 14], m9: [0, 3, 7, 10, 14], mmaj7: [0, 3, 7, 11], '7b5': [0, 4, 6, 10], '7sus4': [0, 5, 7, 10],
+};
+const QUAL = Object.keys(INTERVALS);
 const CH = /^([A-G])([#b]?)(.*?)(?:\/([A-G])([#b]?))?(?::(\d+(?:\.\d+)?))?$/;
 const MAJ: Record<number, string> = { 0: 'I', 2: 'II', 4: 'III', 5: 'IV', 7: 'V', 9: 'VI', 11: 'VII' };
 const MIN: Record<number, string> = { 0: 'I', 2: 'II', 3: 'III', 5: 'IV', 7: 'V', 8: 'VI', 10: 'VII', 11: 'VII' };
@@ -9,7 +14,7 @@ const CHROM: Record<number, string> = { 1: '♭II', 3: '♭III', 6: '♯IV', 8: 
 export interface Cell { name: string; beats: number; numeral: string; ok: boolean; bar: number; }
 export interface Key { tonic: number; minor: boolean; label: string; }
 
-function pc(l: string, a: string) { return (NOTE[l] + (a === '#' ? 1 : a === 'b' ? -1 : 0) + 12) % 12; }
+export function pc(l: string, a: string) { return (NOTE[l] + (a === '#' ? 1 : a === 'b' ? -1 : 0) + 12) % 12; }
 
 export function parseKey(text: string): Key | null {
   const m = (text || '').trim().match(/^([A-Ga-g])([#b]?)\s*(m(?!aj)|min|minor|minore)?/);
@@ -51,3 +56,23 @@ export const BOOKS = [
   { id: 'armonia2', label: 'De Ninno, Armonia vol. II' },
   { id: 'adler', label: 'Adler, The Study of Orchestration' },
 ];
+
+export interface ChordTones { root: number; bass: number; intervals: number[]; beats: number; name: string; }
+
+/** Note di un accordo scritto come simbolo (Am, G7/B, Bb:2): classi di altezza di fondamentale e basso, intervalli, durata. */
+export function chordTones(tok: string, beatsPerBar = 4): ChordTones | null {
+  const m = tok.match(CH);
+  if (!m || !(m[3] in INTERVALS)) return null;
+  const root = pc(m[1], m[2]);
+  return { root, bass: m[4] ? pc(m[4], m[5]) : root, intervals: INTERVALS[m[3]], beats: m[6] ? parseFloat(m[6]) : beatsPerBar, name: tok.split(':')[0] };
+}
+
+export function parseProgression(prog: string, beatsPerBar = 4): ChordTones[] {
+  return (prog || '').replace(/\|/g, ' ').split(/\s+/).filter(Boolean).map((t) => chordTones(t, beatsPerBar)).filter((x): x is ChordTones => !!x);
+}
+
+/** È una sequenza di accordi riproducibile? (almeno due simboli, tutti validi) */
+export function isChordLine(text: string): boolean {
+  const toks = text.replace(/\|/g, ' ').split(/\s+/).filter(Boolean);
+  return toks.length >= 2 && toks.every((t) => !!chordTones(t));
+}
