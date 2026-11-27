@@ -6,6 +6,8 @@ import { suggest, exerciseModels } from '../ui/src/app/suggestions';
 import { analyze, parseProgression, chordTones, isChordLine } from '../ui/src/app/harmony';
 import { voiceLead } from '../ui/src/app/piano';
 import { readMidi, secToQuarters, quartersToSec, stepAt, pairScores, clock } from '../ui/src/app/score-time';
+import { readPortTracks, chase, PortPlayer } from '../ui/src/app/score-ports';
+import { readFileSync } from 'node:fs';
 
 const line = (tpl: string, key: string) => realize(tpl, tonalityFromText(key)!).map((c) => c.chord).join(' ');
 
@@ -83,8 +85,45 @@ test('partitura: tempo, parti e posizione del cursore dal MIDI', () => {
   assert.equal(clock(75.6), '1:15');
 });
 
-test('partitura: abbina MusicXML e MIDI con lo stesso nome', () => {
-  const f = (name: string, kind = 'score') => ({ name, kind, path: 'score/' + name });
+test('partitura: abbina MusicXML, MIDI, sorgente JSON e MIDI per BBCSO', () => {
+  const f = (name: string, kind = 'score', mtime?: number) => ({ name, kind, path: 'score/' + name, mtime });
   assert.deepEqual(pairScores([f('Theme.musicxml'), f('Theme.mid'), f('Sketch.mid'), f('notes.txt'), f('x.mid', 'midi')]),
     [{ name: 'Sketch', mid: 'score/Sketch.mid' }, { name: 'Theme', xml: 'score/Theme.musicxml', mid: 'score/Theme.mid' }]);
+  const [p] = pairScores([f('O.json', 'score', 5), f('O.bbcso.mid', 'score', 9), f('O.musicxml', 'score', 4), f('O.mid', 'score', 4)]);
+  assert.equal(p.name, 'O'); assert.equal(p.json, 'score/O.json'); assert.equal(p.bbcso, 'score/O.bbcso.mid');
+  assert.equal(p.jsonTime, 5); assert.equal(p.bbcsoTime, 9); assert.equal(p.stamp, '4/4');
+});
+
+const BBC = new Uint8Array(readFileSync('tests/fixtures/score.bbcso.mid'));
+
+test('BBCSO: tracce con porta loopMIDI e key switch, stato da ripristinare a metà brano', () => {
+  const tr = readPortTracks(BBC);
+  const cello = tr.find((t) => t.name === 'Cello')!;
+  assert.equal(cello.port, 'SA Cello');
+  assert.deepEqual(cello.keyswitches, [1, 6]);
+  assert.equal(cello.events[0].t, 0);
+  // all'inizio pizzicato (key switch 6); a battuta 4 (9 s a 80 BPM) della partitura di prova già arco (key switch 1) e CC1
+  const at = chase(cello, 9.5);
+  assert.ok(at.some((d) => (d[0] & 0xf0) === 0x90 && d[1] === 1 && d[2] > 0), 'key switch arco');
+  assert.ok(at.some((d) => (d[0] & 0xf0) === 0xb0 && d[1] === 1), 'CC1');
+  assert.ok(!chase(cello, 0).length);
+});
+
+test('BBCSO: ogni parte esce sulla sua porta, le parti silenziate no', async () => {
+  const sent: Record<string, number[][]> = {};
+  const out = (name: string) => ({ name, id: name, send: (d: number[]) => { (sent[name] ??= []).push([...d]); } });
+  const ports = ['SA Flute', 'SA Cello', 'SA Violin I'].map(out);
+  const only = (names: string[]) => ({ outputs: new Map(ports.filter((o) => names.includes(o.name)).map((o) => [o.id, o])) }) as unknown as MIDIAccess;
+  assert.deepEqual(new PortPlayer(BBC, only(['SA Flute'])).resolve(), ['SA Violin I', 'SA Cello']);
+  const pl = new PortPlayer(BBC, only(['SA Flute', 'SA Cello', 'SA Violin I']));
+  assert.deepEqual(pl.resolve(), []);
+  pl.setMuted([], ['Violin I']);
+  pl.setRate(8);                               // otto volte più veloce: il test dura poco
+  await pl.play();
+  await new Promise((r) => setTimeout(r, 400));
+  pl.pause();
+  assert.ok(sent['SA Cello'].some((d) => (d[0] & 0xf0) === 0x90 && d[1] === 6), 'key switch pizzicato al violoncello');
+  assert.ok(sent['SA Flute'].some((d) => (d[0] & 0xf0) === 0x90 && d[1] > 60), 'note del flauto');
+  assert.ok(!(sent['SA Violin I'] ?? []).some((d) => (d[0] & 0xf0) === 0x90), 'violini silenziati');
+  assert.ok(sent['SA Cello'].some((d) => d[0] === 0xb0 && d[1] === 123), 'note spente alla pausa');
 });

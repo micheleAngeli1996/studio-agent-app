@@ -3,7 +3,11 @@ import type { SongFile } from './api';
 
 export interface MidiPart { name: string; channel: number; program: number; notes: number; }
 export interface MidiInfo { tpq: number; tempos: { tick: number; us: number; sec: number }[]; parts: MidiPart[]; endTick: number; }
-export interface ScorePair { name: string; xml?: string; mid?: string; stamp?: string; }
+export interface ScorePair {
+  name: string; xml?: string; mid?: string; stamp?: string;
+  /** Sorgente per tools/score.py e MIDI per BBCSO (tools/bbcso.py), con le date di modifica. */
+  json?: string; bbcso?: string; jsonTime?: number; bbcsoTime?: number;
+}
 
 /** Legge dal MIDI la risoluzione, i cambi di tempo e, per ogni traccia, nome, canale e numero di note. */
 export function readMidi(buf: Uint8Array): MidiInfo {
@@ -78,13 +82,19 @@ export function pairScores(files: SongFile[]): ScorePair[] {
   const map = new Map<string, ScorePair>();
   for (const f of files) {
     if (f.kind !== 'score') continue;
-    const m = f.name.match(/^(.*)\.(musicxml|xml|mid|midi)$/i);
+    const m = f.name.match(/^(.*?)(\.bbcso)?\.(musicxml|xml|mid|midi|json)$/i);
     if (!m) continue;
     const p = map.get(m[1]) ?? { name: m[1] };
-    if (/^mid/i.test(m[2])) p.mid = f.path; else p.xml = f.path;
-    if (f.mtime) p.stamp = (p.stamp ? p.stamp + '/' : '') + f.mtime;
+    const ext = m[3].toLowerCase();
+    if (m[2]) { if (ext.startsWith('mid')) { p.bbcso = f.path; p.bbcsoTime = f.mtime; } }
+    else if (ext === 'json') { p.json = f.path; p.jsonTime = f.mtime; }
+    else {
+      if (ext.startsWith('mid')) p.mid = f.path; else p.xml = f.path;
+      if (f.mtime) p.stamp = (p.stamp ? p.stamp + '/' : '') + f.mtime;
+    }
     map.set(m[1], p);
   }
+  for (const [k, p] of map) if (!p.xml && !p.mid) map.delete(k);
   return [...map.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 

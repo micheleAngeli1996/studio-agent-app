@@ -24,6 +24,7 @@
           @for (r of rates; track r) { <option [value]="r">{{ r * 100 }}%</option> }
         </select>
       </label>
+      <button class="btn sm" type="button" [class.on]="follow()" [attr.aria-pressed]="follow()" (click)="toggleFollow()" title="La pagina scorre con l'ascolto; se scorri a mano si ferma per qualche secondo">segui</button>
       <span class="szoom">
         <button class="btn sq" type="button" (click)="setZoom(-0.1)" aria-label="Riduci" title="Riduci">−</button>
         <span class="mono small">{{ (zoom() * 100).toFixed(0) }}%</span>
@@ -46,16 +47,33 @@
       <label class="small dim out">uscita
         <select [ngModel]="output()" (ngModelChange)="setOutput($event)" (focus)="refreshOutputs()" aria-label="Uscita dell'ascolto">
           <option value="sf">Soundfont interno@if (bank()) { · {{ bank() }} }</option>
-          @for (o of outputs(); track o.id) { <option [value]="o.id">MIDI · {{ o.name }}</option> }
-          @if (output() !== 'sf' && !outputs().length) { <option [value]="output()">MIDI (porta salvata)</option> }
+          <option value="bbcso">BBC Symphony Orchestra · Cubase (porte SA …)</option>
+          @for (o of outputs(); track o.id) { @if (!o.name.startsWith('SA ')) { <option [value]="o.id">MIDI · {{ o.name }}</option> } }
+          @if (output() !== 'sf' && output() !== 'bbcso' && !outputs().length) { <option [value]="output()">MIDI (porta salvata)</option> }
         </select>
       </label>
-      <button class="btn ghost2 small" type="button" (click)="chooseSoundfont()" title="Usa un tuo soundfont .sf2/.sf3 al posto di quello incluso">Soundfont…</button>
+      @if (output() === 'bbcso' && bbcso(); as b) {
+        <details class="bbc small">
+          <summary>BBCSO {{ b.edition }} · {{ b.parts.length }} parti@if (b.missing.length) { · <span class="warn">{{ b.missing.length }} porte mancanti</span> }</summary>
+          <table>
+            <thead><tr><th>Parte</th><th>Porta loopMIDI</th><th>Preset BBCSO in Cubase</th><th>Articolazioni</th></tr></thead>
+            <tbody>
+              @for (x of b.parts; track x.part) {
+                <tr [class.miss]="b.missing.includes(x.port)">
+                  <td>{{ x.part }}</td><td class="mono">{{ x.port }}</td><td>{{ x.preset ?? '—' }}</td>
+                  <td>{{ artList(x) }}@if (x.missing.length) { <span class="dim"> · non disponibili: {{ x.missing.join(', ') }}</span> }</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </details>
+      }
+      @if (output() === 'sf') { <button class="btn ghost2 small" type="button" (click)="chooseSoundfont()" title="Usa un tuo soundfont .sf2/.sf3 al posto di quello incluso">Soundfont…</button> }
       @if (bank() && output() === 'sf') { <button class="link small" type="button" (click)="chooseSoundfont(true)">incluso</button> }
     </div>
   }
   @if (open() && (busy() || msg())) { <p class="smsg small" role="status">{{ busy() || msg() }}</p> }
-  <div class="sheet" #sheet [hidden]="!open() || !pairs().length || !current()?.xml" (click)="onSheetClick($event)" title="Clic su una battuta per ascoltare da lì"></div>
+  <div class="sheet" #sheet [hidden]="!open() || !pairs().length || !current()?.xml" (click)="onSheetClick($event)" (scroll)="onSheetScroll()" (wheel)="onSheetWheel()" title="Clic su una battuta per ascoltare da lì"></div>
 </section>
 @if (open()) {
   <div class="hsplit" role="separator" aria-orientation="horizontal" aria-label="Ridimensiona la partitura (frecce su e giù)" tabindex="0"

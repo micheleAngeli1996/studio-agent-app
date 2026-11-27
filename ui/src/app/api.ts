@@ -41,6 +41,8 @@ export interface StudioApi {
   midiApps(): Promise<{ windows: boolean; loopmidi: { running: boolean; path: string }; kk: { running: boolean; path: string } }>;
   launchMidiApp(which: 'kk' | 'loopmidi'): Promise<{ ok: boolean; message?: string }>;
   readFile(path: string): Promise<Uint8Array | null>;
+  scoreBbcso(jsonPath: string, edition?: string): Promise<{ ok: boolean; message?: string; file?: string; edition?: string; ports?: string[];
+    parts?: { part: string; port: string; preset: string | null; articulations: Record<string, number>; missing: string[] }[] }>;
   soundfont(): Promise<{ name: string; custom: boolean; data: Uint8Array } | null>;
   pickSoundfont(reset?: boolean): Promise<boolean>;
   pythonInfo(again?: boolean): Promise<{ path: string; version: string; missing: string[] }>;
@@ -94,6 +96,7 @@ function demoApi(): StudioApi {
     readFile: async (p) => { try { const r = await fetch(p); return r.ok ? new Uint8Array(await r.arrayBuffer()) : null; } catch { return null; } },
     soundfont: async () => { try { const r = await fetch('demo/soundfont.sf3'); return r.ok ? { name: 'soundfont di prova', custom: false, data: new Uint8Array(await r.arrayBuffer()) } : null; } catch { return null; } },
     pickSoundfont: async () => false,
+    scoreBbcso: async () => ({ ok: false, message: 'BBCSO funziona solo nell\'app (serve Python e tools/bbcso.py).' }),
     pythonInfo: async () => ({ path: 'python', version: '3.13.5', missing: [] }),
     chooseRoot: async () => ({ ok: false, root: '(anteprima)', message: 'Disponibile solo nell\'app.' }),
     listSongs: async () => structuredClone(songs),

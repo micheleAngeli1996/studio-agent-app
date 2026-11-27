@@ -1,6 +1,7 @@
 // Partitura integrata: riproduzione del MIDI dell'orchestrazione con un soundfont General MIDI (spessasynth, AudioWorklet).
 // La libreria e il soundfont si caricano solo al primo ascolto; un solo motore per tutta l'app.
 import { api } from './api';
+import type { Player } from './score-ports';
 
 type Lib = typeof import('spessasynth_lib');
 type Seq = InstanceType<Lib['Sequencer']>;
@@ -8,7 +9,7 @@ type Synth = InstanceType<Lib['WorkletSynthesizer']>;
 
 let shared: Promise<ScoreEngine> | null = null;
 
-export class ScoreEngine {
+export class ScoreEngine implements Player {
   private constructor(private ctx: AudioContext, private synth: Synth, private seq: Seq, private gain: GainNode, readonly bank: string, readonly custom: boolean) {}
   private port: MIDIOutput | null = null;
   private muted = new Set<number>();
@@ -66,10 +67,10 @@ export class ScoreEngine {
   get time() { return this.seq.currentTime; }
   set time(t: number) { this.seq.currentTime = Math.max(0, t); }
   get duration() { return this.seq.duration; }
-  set rate(r: number) { this.seq.playbackRate = r; }
+  setRate(r: number) { this.seq.playbackRate = r; }
   set volume(v: number) { this.gain.gain.value = v; }
 
-  setMuted(channels: number[]) { this.muted = new Set(channels); this.applyMutes(); }
+  setMuted(channels: number[], _names: string[] = []) { this.muted = new Set(channels); this.applyMutes(); }
   private applyMutes() {
     this.synth.midiChannels.forEach((c, i) => c.setSystemParameter('isMuted', this.muted.has(i)));
   }

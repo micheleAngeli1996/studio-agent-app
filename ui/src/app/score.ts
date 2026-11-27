@@ -6,6 +6,9 @@ import type { OpenSheetMusicDisplay } from 'opensheetmusicdisplay';
 import { api, isDemo, SongFile } from './api';
 import { MidiInfo, MidiPart, ScorePair, clock, pairScores, quartersToSec, readMidi, secToQuarters, stepAt } from './score-time';
 import { ScoreEngine } from './score-audio';
+import { Player, PortPlayer } from './score-ports';
+
+export interface BbcsoPart { part: string; port: string; preset: string | null; articulations: Record<string, number>; missing: string[]; }
 
 const LS = 'studio-agent.ui.score';
 const lsGet = (k: string) => { try { return localStorage.getItem(LS + k); } catch { return null; } };
@@ -50,11 +53,16 @@ export class ScoreView implements OnDestroy {
   outputs = signal<{ id: string; name: string }[]>([]);
   output = signal(lsGet('.output') ?? 'sf');
   bank = signal('');
+  follow = signal(lsGet('.follow') !== '0');
+  bbcso = signal<{ edition: string; parts: BbcsoPart[]; missing: string[] } | null>(null);
 
   private osmd: OpenSheetMusicDisplay | null = null;
   private info: MidiInfo | null = null;
   private mid: Uint8Array | null = null;
   private loadedMid = '';
+  private player: Player | null = null;
+  private userScroll = 0;
+  private autoScroll = 0;
   private steps: number[] = [];
   private stepMeasures: number[] = [];
   private cur = 0;
@@ -70,7 +78,7 @@ export class ScoreView implements OnDestroy {
     });
   }
 
-  ngOnDestroy() { this.stopLoop(); void ScoreEngine.get().then((e) => e.pause()).catch(() => {}); }
+  ngOnDestroy() { this.stopLoop(); this.player?.pause(); }
 
   onResize() { this.winH.set(window.innerHeight); }
   toggle() { this.open.update((v) => !v); lsSet('.open', this.open() ? '1' : '0'); }
@@ -153,20 +161,33 @@ export class ScoreView implements OnDestroy {
   }
 
   // ---------- cursore ----------
-  private moveTo(k: number) {
+  private moveTo(k: number, force = false) {
     const c = this.osmd?.cursor;
     if (!c) return;
     if (k < this.cur) { c.reset(); this.cur = 0; }
+    const moved = k !== this.cur;
     while (this.cur < k && !c.Iterator.EndReached) { c.next(); this.cur++; }
     c.update();
     this.measure.set(this.stepMeasures[this.cur] ?? this.measure());
-    this.follow();
+    if (moved || force) this.followCursor(force);
   }
-  private follow() {
+  /** Porta in vista il cursore, ma non se hai appena fatto scorrere la partitura a mano (6 s) o se «segui» è spento. */
+  private followCursor(force = false) {
     const box = this.sheet()?.nativeElement, el = this.osmd?.cursor?.cursorElement;
     if (!box || !el) return;
+    if (!force && (!this.follow() || performance.now() - this.userScroll < 6000)) return;
     const top = el.offsetTop, h = el.offsetHeight || 60;
-    if (top < box.scrollTop + 10 || top + h > box.scrollTop + box.clientHeight - 10) box.scrollTo({ top: Math.max(0, top - 24), behavior: this.playing() ? 'smooth' : 'auto' });
+    if (top < box.scrollTop + 10 || top + h > box.scrollTop + box.clientHeight - 10) {
+      this.autoScroll = performance.now();
+      box.scrollTo({ top: Math.max(0, top - 24), behavior: this.playing() ? 'smooth' : 'auto' });
+    }
+  }
+  /** Scorrimento della partitura: se non l'ha fatto il cursore, l'hai fatto tu. */
+  onSheetScroll() { if (performance.now() - this.autoScroll > 900) this.userScroll = performance.now(); }
+  onSheetWheel() { this.userScroll = performance.now(); }
+  toggleFollow() {
+    this.follow.update((v) => !v); lsSet('.follow', this.follow() ? '1' : '0');
+    if (this.follow()) { this.userScroll = 0; this.followCursor(true); }
   }
   private syncTo(sec: number) {
     this.pos.set(sec);
@@ -195,44 +216,89 @@ export class ScoreView implements OnDestroy {
           if (!best || d < best.d) best = { q: m.parentSourceMeasure.AbsoluteTimestamp.RealValue * 4, d };
         }
       }
-      if (best && best.d < 12) void this.seek(quartersToSec(this.info, best.q));
+      if (best && best.d < 12) void this.seek(quartersToSec(this.info, best.q), false);
     } catch { /* struttura interna diversa: ignora il clic */ }
   }
 
   // ---------- ascolto ----------
-  private async engine(): Promise<ScoreEngine | null> {
-    if (!this.mid || !this.current()?.mid) return null;
+  private async engine(): Promise<Player | null> {
+    const p = this.current();
+    if (!p) return null;
+    if (this.output() === 'bbcso') return this.bbcsoPlayer(p);
+    if (!this.mid || !p.mid) return null;
     let e: ScoreEngine;
     try {
       if (!this.bank()) this.busy.set('Carico il soundfont (la prima volta qualche secondo)…');
       e = await ScoreEngine.get();
       this.bank.set(e.bank);
     } catch (err) { this.busy.set(''); this.msg.set((err as Error).message); return null; }
-    const key = this.current()!.mid!;
+    const key = 'sf|' + p.mid + '|' + p.stamp;
     if (this.loadedMid !== key) {
       this.busy.set('Preparo l\'ascolto…');
-      const d = await e.load(this.mid, this.current()!.name + '.mid');
+      const d = await e.load(this.mid, p.name + '.mid');
       if (d > 0) this.dur.set(d);
       this.loadedMid = key;
     }
-    e.rate = this.rate();
-    e.setMuted(this.muted());
+    e.setRate(this.rate());
+    e.setMuted(this.muted(), this.mutedNames());
     e.setOutput(await this.port());
     this.busy.set('');
+    this.player = e;
     return e;
   }
+
+  /** BBCSO in Cubase: MIDI con i key switch delle expression map (rigenerato se la partitura è più recente), una porta per strumento. */
+  private async bbcsoPlayer(p: ScorePair): Promise<Player | null> {
+    if (!p.json && !p.bbcso) { this.msg.set(`Per BBCSO serve la sorgente «${p.name}.json» di tools/score.py accanto alla partitura.`); return null; }
+    let file = p.bbcso;
+    const stale = !p.bbcso || (p.jsonTime ?? 0) > (p.bbcsoTime ?? 0);
+    const key = 'bbcso|' + (p.json ?? p.bbcso) + '|' + p.jsonTime + '|' + p.bbcsoTime;
+    if (this.loadedMid !== key || !this.player) {
+      if (stale && p.json) {
+        this.busy.set('Preparo il MIDI per BBCSO con le expression map…');
+        const r = await api.scoreBbcso(p.json);
+        if (!r.ok) { this.busy.set(''); this.msg.set(r.message ?? 'tools/bbcso.py non è riuscito.'); return null; }
+        file = r.file;
+        this.bbcso.set({ edition: r.edition ?? '', parts: r.parts ?? [], missing: [] });
+      }
+      const bytes = file ? await api.readFile(file) : null;
+      if (!bytes) { this.busy.set(''); this.msg.set('Il MIDI per BBCSO non si legge.'); return null; }
+      await this.refreshOutputs();
+      if (!this.midiAccess) { this.busy.set(''); this.msg.set('MIDI non disponibile: il MIDI per BBCSO è pronto, ma non posso mandarlo alle porte.'); return null; }
+      this.player?.pause();
+      this.player = new PortPlayer(bytes, this.midiAccess);
+      this.loadedMid = key;
+    }
+    const pp = this.player as PortPlayer;
+    const missing = pp.resolve();
+    const ports = [...new Set(pp.tracks.map((t) => t.port))];
+    this.bbcso.update((b) => ({ edition: b?.edition ?? '', parts: b?.parts ?? pp.tracks.map((t) => ({ part: t.name, port: t.port, preset: null, articulations: {}, missing: [] })), missing }));
+    this.busy.set('');
+    if (missing.length === ports.length) {
+      this.msg.set(`Nessuna porta BBCSO trovata (${missing.join(', ')}): crea le porte in loopMIDI e apri il progetto Cubase BBCSO (guida: docs/bbcso-cubase.md).`);
+      return null;
+    }
+    this.msg.set(missing.length ? `Mancano le porte ${missing.join(', ')}: quelle parti non suonano.` : '');
+    pp.setRate(this.rate());
+    pp.setMuted(this.muted(), this.mutedNames());
+    return pp;
+  }
+  artList(x: BbcsoPart) { return Object.entries(x.articulations).map(([k, v]) => `${k} ×${v}`).join(', ') || '—'; }
+  private mutedNames() { return this.parts().filter((x) => this.muted().includes(x.channel)).map((x) => x.name); }
 
   async togglePlay() {
     if (this.playing()) { this.halt(); return; }
     const e = await this.engine();
     if (!e) return;
+    if (e.duration > 0 && this.output() === 'bbcso') this.dur.set(Math.max(this.dur(), e.duration));
     if (this.pos() >= this.dur() - 0.05) this.pos.set(0);
+    this.userScroll = 0;
     e.time = this.pos();
     await e.play();
     this.playing.set(true);
     this.loop(e);
   }
-  private loop(e: ScoreEngine) {
+  private loop(e: Player) {
     this.stopLoop();
     const t0 = performance.now();
     const tick = () => {
@@ -252,16 +318,18 @@ export class ScoreView implements OnDestroy {
   /** Pausa: il cursore resta dov'è. */
   halt() {
     this.stopLoop();
-    if (this.playing()) void ScoreEngine.get().then((e) => e.pause()).catch(() => {});
+    if (this.playing()) this.player?.pause();
     this.playing.set(false);
   }
   stop() { this.halt(); this.syncTo(0); }
-  async seek(sec: number) {
+  async seek(sec: number, scroll = true) {
     sec = Math.max(0, Math.min(sec, this.dur()));
+    if (scroll) this.userScroll = 0;
     this.syncTo(sec);
-    if (this.playing()) { const e = await ScoreEngine.get(); e.time = sec; this.loop(e); }
+    const e = this.player;
+    if (this.playing() && e) { e.time = sec; this.loop(e); }
   }
-  setRate(r: number) { this.rate.set(r); lsSet('.rate', String(r)); void ScoreEngine.get().then((e) => (e.rate = r)).catch(() => {}); }
+  setRate(r: number) { this.rate.set(r); lsSet('.rate', String(r)); this.player?.setRate(r); }
   setZoom(d: number) {
     const z = Math.round(Math.max(0.4, Math.min(1.6, this.zoom() + d)) * 100) / 100;
     this.zoom.set(z); lsSet('.zoom', String(z));
@@ -275,7 +343,7 @@ export class ScoreView implements OnDestroy {
     const soloed = !this.isMuted(ch) && this.muted().length === all.length - 1;
     if (ev?.altKey) this.muted.set(soloed ? [] : all.filter((c) => c !== ch));
     else this.muted.update((m) => (m.includes(ch) ? m.filter((c) => c !== ch) : [...m, ch]));
-    void ScoreEngine.get().then((e) => e.setMuted(this.muted())).catch(() => {});
+    this.player?.setMuted(this.muted(), this.mutedNames());
   }
   solo(ch: number) { this.toggleMute(ch, { altKey: true } as MouseEvent); }
 
@@ -287,7 +355,7 @@ export class ScoreView implements OnDestroy {
     } catch { this.outputs.set([]); }
   }
   private async port(): Promise<MIDIOutput | null> {
-    if (this.output() === 'sf') return null;
+    if (this.output() === 'sf' || this.output() === 'bbcso') return null;
     await this.refreshOutputs();
     const p = this.midiAccess?.outputs.get(this.output()) ?? null;
     if (!p) this.msg.set('La porta MIDI scelta non c\'è (loopMIDI è avviato?): suono con il soundfont interno.');
@@ -296,14 +364,16 @@ export class ScoreView implements OnDestroy {
   async setOutput(id: string) {
     this.halt();
     this.output.set(id); lsSet('.output', id);
-    if (id !== 'sf') this.msg.set('Uscita MIDI: ogni parte esce sul suo canale. Komplete Kontrol suona un solo strumento; per l\'orchestra completa ascolta in Cubase con le tracce sulla porta e sui canali giusti.');
+    this.player?.pause(); this.player = null; this.loadedMid = '';
+    if (id === 'bbcso') this.msg.set('BBCSO: ogni strumento esce sulla sua porta loopMIDI («SA Violin I», «SA Flute»…) verso Cubase, con i key switch delle expression map.');
+    else if (id !== 'sf') this.msg.set('Uscita MIDI: ogni parte esce sul suo canale. Komplete Kontrol suona un solo strumento: per l\'orchestra usa l\'uscita BBCSO.');
     else this.msg.set('');
   }
   async chooseSoundfont(reset = false) {
     if (isDemo) return;
     const ok = await api.pickSoundfont(reset);
     if (!ok) return;
-    this.halt(); this.loadedMid = ''; this.bank.set('');
+    this.halt(); this.loadedMid = ''; this.bank.set(''); this.player = null;
     await ScoreEngine.reset();
     this.msg.set(reset ? 'Torno al soundfont incluso: si carica al prossimo ascolto.' : 'Soundfont scelto: si carica al prossimo ascolto.');
   }

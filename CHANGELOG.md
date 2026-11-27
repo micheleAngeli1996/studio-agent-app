@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.1 — 2026-11-27
+
+### Nuovo
+- **Ascolto con BBC Symphony Orchestra** nella partitura: uscita «BBC Symphony Orchestra · Cubase». Ogni strumento esce sulla sua porta loopMIDI («SA Violin I», «SA Flute»…) verso le tracce BBCSO di Cubase, con i key switch delle expression map BBCSO (quelle del playback template di Dorico per BBCSO Pro, Core o Discover) e la dinamica su CC1 per le note lunghe, sulla velocity per le brevi. Il MIDI apposito (`<nome>.bbcso.mid`) lo prepara da solo `tools/bbcso.py` al primo ascolto e quando la partitura cambia; una tabella mostra per ogni parte porta, preset BBCSO e articolazioni usate, e segnala le porte mancanti. Guida per Cubase: `docs/bbcso-cubase.md` nella cartella studio-agent.
+
+### Corretto
+- **Scorrimento della partitura durante l'ascolto**: ora puoi scorrere a mano; il cursore smette di riportare la pagina su di sé per qualche secondo e riprende al passo successivo. Il pulsante «segui» spegne del tutto lo scorrimento automatico.
+- Le partiture già scritte con la vecchia versione di `score.py` (senza chiavi) vanno rigenerate: quelle del brano di prova sono già state rifatte.
+
 ## 0.6.0 — 2026-11-27
 
 ### Nuovo

@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('studio', {
   analyzeMidi: (song) => ipcRenderer.invoke('harmony:analyzeMidi', song),
   compareAudio: (req) => ipcRenderer.invoke('audio:compare', req),
   readFile: (p) => ipcRenderer.invoke('file:read', p),
+  scoreBbcso: (jsonPath, edition) => ipcRenderer.invoke('score:bbcso', jsonPath, edition),
   soundfont: () => ipcRenderer.invoke('soundfont:get'),
   pickSoundfont: (reset) => ipcRenderer.invoke('soundfont:pick', reset),
   pythonInfo: (again) => ipcRenderer.invoke('python:info', again),

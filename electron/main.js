@@ -188,6 +188,17 @@ ipcMain.handle('file:read', (_e, p) => {
   if (!inside(p) || !/\.(musicxml|xml|mid|midi)$/i.test(p)) return null;
   try { return new Uint8Array(fs.readFileSync(p)); } catch { return null; }
 });
+// MIDI per BBCSO con i key switch delle expression map (tools/bbcso.py, accanto al .json di score.py)
+ipcMain.handle('score:bbcso', async (_e, jsonPath, edition) => {
+  if (!inside(jsonPath) || !/\.json$/i.test(jsonPath)) return { ok: false, message: 'Partitura fuori dalla cartella del progetto' };
+  if (!fs.existsSync(path.join(ROOT, 'tools', 'bbcso.py'))) return { ok: false, message: 'Manca tools/bbcso.py nella cartella studio-agent' };
+  const args = [path.join(ROOT, 'tools', 'bbcso.py'), jsonPath, '--json'];
+  if (edition) args.push('--edition', edition);
+  const r = await runPy(args);
+  const line = r.out.trim().split(/\r?\n/).reverse().find((l) => l.startsWith('{'));
+  if (!line) return { ok: false, message: lastLine(r.err) || 'tools/bbcso.py non ha risposto' };
+  return JSON.parse(line);
+});
 ipcMain.handle('soundfont:get', () => {
   const custom = settings().soundfont;
   for (const [p, own] of [[custom, true], [SF_BUNDLED, false]]) {
