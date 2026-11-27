@@ -125,6 +125,61 @@ function createWindow() {
 function inside(p) { const r = path.resolve(p); return r === ROOT || r.startsWith(ROOT + path.sep); }
 
 ipcMain.handle('info', () => ({ root: ROOT, hasAgents: isProject(ROOT), version: app.getVersion() }));
+// ---------- programmi per l'ascolto via MIDI (solo Windows): loopMIDI e Komplete Kontrol ----------
+const MIDI_APPS = {
+  loopmidi: { exe: 'loopMIDI.exe', paths: ['C:\\Program Files (x86)\\Tobias Erichsen\\loopMIDI\\loopMIDI.exe', 'C:\\Program Files\\Tobias Erichsen\\loopMIDI\\loopMIDI.exe'] },
+  kk: { exe: 'Komplete Kontrol.exe', paths: [
+    'C:\\Program Files\\Native Instruments\\Komplete Kontrol\\Komplete Kontrol.exe',
+    'D:\\Native Instruments\\Komplete Kontrol\\Komplete Kontrol.exe',
+    'E:\\Native Instrument\\Application\\Komplete Kontrol\\Komplete Kontrol.exe',
+    'E:\\Native Instruments\\Komplete Kontrol\\Komplete Kontrol.exe'] },
+};
+function runningExes() {
+  return new Promise((resolve) => {
+    if (process.platform !== 'win32') return resolve([]);
+    let out = '';
+    const c = spawn('tasklist', ['/FO', 'CSV', '/NH'], { windowsHide: true });
+    c.stdout.on('data', (d) => { out += d; });
+    c.on('error', () => resolve([]));
+    c.on('close', () => resolve(out.split(/\r?\n/).map((l) => (l.match(/^"([^"]+)"/) || [])[1]).filter(Boolean).map((x) => x.toLowerCase())));
+  });
+}
+function regInstallDir(key) {
+  return new Promise((resolve) => {
+    if (process.platform !== 'win32') return resolve('');
+    let out = '';
+    const c = spawn('reg', ['query', key, '/v', 'InstallDir'], { windowsHide: true });
+    c.stdout.on('data', (d) => { out += d; });
+    c.on('error', () => resolve(''));
+    c.on('close', () => resolve(((out.match(/InstallDir\s+REG_SZ\s+(.+)/) || [])[1] || '').trim()));
+  });
+}
+async function findMidiApp(which) {
+  const a = MIDI_APPS[which];
+  const fixed = (settings().apps || {})[which];
+  const cands = [fixed, ...a.paths];
+  if (which === 'kk') {
+    const dir = await regInstallDir('HKLM\\SOFTWARE\\Native Instruments\\Komplete Kontrol');
+    if (dir) cands.unshift(path.join(dir, a.exe));
+  }
+  return cands.find((p) => p && fs.existsSync(p)) || '';
+}
+ipcMain.handle('midi:apps', async () => {
+  const run = await runningExes();
+  return {
+    windows: process.platform === 'win32',
+    loopmidi: { running: run.includes('loopmidi.exe'), path: await findMidiApp('loopmidi') },
+    kk: { running: run.includes('komplete kontrol.exe'), path: await findMidiApp('kk') },
+  };
+});
+ipcMain.handle('midi:launch', async (_e, which) => {
+  if (!MIDI_APPS[which]) return { ok: false };
+  const p = await findMidiApp(which);
+  if (!p) return { ok: false, message: `${MIDI_APPS[which].exe} non trovato` };
+  const err = await shell.openPath(p);
+  return err ? { ok: false, message: err } : { ok: true };
+});
+
 ipcMain.handle('python:info', async (_e, again) => { if (again) pyDetect = null; return ensurePython(); });
 ipcMain.handle('settings:chooseRoot', () => chooseRoot(win));
 ipcMain.handle('songs:list', () => songs.listSongs(ROOT));

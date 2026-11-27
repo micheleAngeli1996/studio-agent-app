@@ -248,3 +248,5 @@ button.cell:hover:not(:disabled) { border-color: var(--line2); } button.cell:dis
 .spec .gl { fill: #6b6f76; font: 8px var(--mono, monospace); }
 .formbox .hform .check { align-self: flex-end; min-height: 40px; }
 .hbody .formbox { padding: 0; background: none; border: 0; }
+.warn { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 6px; background: rgba(224, 160, 60, .12); border: 1px solid rgba(224, 160, 60, .4); color: var(--text); }
+.warnlink { color: var(--accent); }

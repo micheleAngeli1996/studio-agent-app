@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.4 — 2026-11-27
+
+### Corretto
+- **Uscita MIDI dimenticata**: se all'avvio dell'app loopMIDI non era ancora partito, la porta scelta veniva sostituita per sempre dal pianoforte interno. Ora la scelta resta memorizzata e la porta viene ripresa da sola appena ricompare.
+- **Avvisi sull'ascolto via MIDI**: l'app controlla se loopMIDI e Komplete Kontrol sono aperti, lo segnala nella barra della progressione («⚠ uscita MIDI») e nella scheda Ascolto, con i pulsanti «Avvia loopMIDI» e «Apri Komplete Kontrol». Promemoria: Komplete Kontrol non ricarica da solo lo strumento.
+
 ## 0.5.3 — 2026-11-27
 
 ### Cambiato

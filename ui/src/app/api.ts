@@ -38,6 +38,8 @@ export interface Analysis { ok: boolean; data?: Record<string, any>; message?: s
 
 export interface StudioApi {
   info(): Promise<{ root: string; hasAgents: boolean; version?: string }>;
+  midiApps(): Promise<{ windows: boolean; loopmidi: { running: boolean; path: string }; kk: { running: boolean; path: string } }>;
+  launchMidiApp(which: 'kk' | 'loopmidi'): Promise<{ ok: boolean; message?: string }>;
   pythonInfo(again?: boolean): Promise<{ path: string; version: string; missing: string[] }>;
   chooseRoot(): Promise<{ ok: boolean; root: string; message?: string }>;
   listSongs(): Promise<Song[]>;
@@ -84,6 +86,8 @@ function demoApi(): StudioApi {
   let listener: (id: string, ev: AgentEvent) => void = () => {};
   return {
     info: async () => ({ root: '(anteprima)', hasAgents: true, version: 'anteprima' }),
+    midiApps: async () => ({ windows: false, loopmidi: { running: true, path: '' }, kk: { running: true, path: '' } }),
+    launchMidiApp: async () => ({ ok: true }),
     pythonInfo: async () => ({ path: 'python', version: '3.13.5', missing: [] }),
     chooseRoot: async () => ({ ok: false, root: '(anteprima)', message: 'Disponibile solo nell\'app.' }),
     listSongs: async () => structuredClone(songs),

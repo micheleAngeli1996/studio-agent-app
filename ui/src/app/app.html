@@ -152,6 +152,9 @@
                   <button type="button" class="mc mono" role="listitem" [class.now]="nowIdx() === $index" [class.bad]="!c.ok" [class.gend]="c.groupEnd" [disabled]="!c.ok" (click)="previewCell($index)" [title]="c.numeral || c.name">{{ c.name }}</button>
                 } @empty { <span class="dim small">Nessun accordo: espandi per scrivere la progressione.</span> }
               </div>
+              @if (midiWarning() || midiNotice()) {
+                <button class="link small warnlink nowrap" (click)="openTab('listen')" title="{{ midiWarning() || midiNotice() }}">⚠ uscita MIDI</button>
+              }
               <span class="dim small mono nowrap">{{ bpmNum() }} BPM · {{ soundId() === 'internal' ? 'piano interno' : 'MIDI' }}</span>
             </div>
             @if (harmOpen()) {
@@ -221,7 +224,17 @@
                   <button class="link small" (click)="refreshMidi()" title="Rileggi le porte MIDI (dopo aver avviato loopMIDI)">Aggiorna porte</button>
                   <span class="dim small mono">{{ bpmNum() }} BPM · clic su un accordo per sentirlo</span>
                 </div>
+                @if (midiNotice()) {
+                  <p class="warn small">{{ midiNotice() }}@if (midiApps()?.loopmidi?.path && !midiApps()?.loopmidi?.running) { <button class="btn small-btn" (click)="launchMidiApp('loopmidi')">Avvia loopMIDI</button> }</p>
+                }
+                @if (midiWarning(); as w) {
+                  <p class="warn small">{{ w }}
+                    @if (!midiApps()?.loopmidi?.running && midiApps()?.loopmidi?.path) { <button class="btn small-btn" (click)="launchMidiApp('loopmidi')">Avvia loopMIDI</button> }
+                    @else if (!midiApps()?.kk?.running && midiApps()?.kk?.path) { <button class="btn small-btn" (click)="launchMidiApp('kk')">Apri Komplete Kontrol</button> }
+                  </p>
+                }
                 @if (soundHint() || midiError()) { <p class="dim small hint">{{ midiError() || soundHint() }}</p> }
+                @if (usesLoopMidi()) { <p class="dim small">Komplete Kontrol non ricarica da solo lo strumento: dopo averlo aperto carica The Grandeur (o un altro piano) e lascia attiva la porta «Studio Agent» in Preferenze → MIDI → Input.</p> }
                 <p class="dim small">Il pulsante ▶ nella barra in alto suona la progressione; un clic su un accordo lo suona da solo.</p>
                   }
                   @case ('voices') {

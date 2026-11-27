@@ -681,6 +681,7 @@ export class App {
       .filter((x): x is { idx: number; ct: ChordTones } => !!x.ct);
   }
   togglePlay() {
+    if (this.soundId() !== 'internal') this.checkMidiApps();
     if (this.playing() === 'prog') { this.stopPlay(); return; }
     const list = this.progChords();
     if (!list.length) return;
@@ -713,35 +714,69 @@ export class App {
   soundId = signal('internal');
   midiError = signal('');
   private midiAccess: MIDIAccess | null = null;
+  /** Uscita scelta da te (nome della porta o 'internal'): resta memorizzata anche se la porta sparisce per un po'. */
+  private preferredSound = lsGet('.sound') ?? '';
+  midiNotice = signal('');
   async loadMidi() {
     if (this.midiAccess || !navigator.requestMIDIAccess) return;
     try {
       this.midiAccess = await navigator.requestMIDIAccess({ sysex: false });
-      const refresh = () => {
-        const list = [...this.midiAccess!.outputs.values()].filter((o) => !/GS Wavetable/i.test(o.name || ''))
-          .map((o) => ({ id: o.id, name: o.name || o.id }));
-        this.midiOutputs.set(list);
-        if (this.soundId() !== 'internal' && !list.some((o) => o.id === this.soundId())) this.setSound('internal');
-      };
-      this.midiAccess.onstatechange = refresh;
-      refresh();
-      let saved = ''; try { saved = localStorage.getItem(LS + '.sound') || ''; } catch { /* ignora */ }
-      const hit = this.midiOutputs().find((o) => o.name === saved);
-      if (hit) this.setSound(hit.id);
-      else if (!saved) {                       // primo avvio: se c'è la porta di loopMIDI «Studio Agent» la usa
-        const lp = this.midiOutputs().find((o) => /studio agent|loopmidi/i.test(o.name));
-        if (lp) this.setSound(lp.id);
-      }
+      this.midiAccess.onstatechange = () => this.refreshPorts();
       try { const cm = localStorage.getItem(LS + '.channels') as ChannelMode | null; if (cm) this.setChanMode(cm); } catch { /* ignora */ }
+      this.refreshPorts();
     } catch (e: any) { this.midiError.set('MIDI non disponibile: ' + (e?.message || e)); }
   }
+  /** Rilegge le porte: se la porta preferita c'è la usa, se è sparita torna al pianoforte interno senza dimenticarla. */
+  private refreshPorts() {
+    if (!this.midiAccess) return;
+    const list = [...this.midiAccess.outputs.values()].filter((o) => !/GS Wavetable/i.test(o.name || ''))
+      .map((o) => ({ id: o.id, name: o.name || o.id }));
+    this.midiOutputs.set(list);
+    let pref = this.preferredSound;
+    if (!pref) pref = list.find((o) => /studio agent|loopmidi/i.test(o.name))?.name ?? '';   // primo avvio: porta di loopMIDI
+    if (!pref || pref === 'internal') { if (this.soundId() !== 'internal') this.applySound('internal'); this.midiNotice.set(''); return; }
+    const hit = list.find((o) => o.name === pref);
+    if (hit) { if (this.soundId() !== hit.id) this.applySound(hit.id); this.midiNotice.set(''); }
+    else {
+      if (this.soundId() !== 'internal') this.applySound('internal');
+      this.midiNotice.set(`La porta «${pref}» non c'è: per ora suona il pianoforte interno. Avvia loopMIDI e la porta verrà ripresa da sola.`);
+    }
+    this.checkMidiApps();
+  }
+  /** Scelta dal menu «Suono»: diventa la preferita. */
   setSound(id: string) {
+    const out = id === 'internal' ? null : this.midiAccess?.outputs.get(id) ?? null;
+    this.preferredSound = out?.name || 'internal';
+    this.preferredSoundName.set(this.preferredSound);
+    lsSet('.sound', this.preferredSound);
+    this.midiNotice.set('');
+    this.applySound(id);
+    this.checkMidiApps();
+  }
+  private applySound(id: string) {
     this.stopPlay();
     this.soundId.set(id);
-    const out = id === 'internal' ? null : this.midiAccess?.outputs.get(id) ?? null;
-    this.piano.setMidiOutput(out);
-    try { localStorage.setItem(LS + '.sound', out?.name || ''); } catch { /* ignora */ }
+    this.piano.setMidiOutput(id === 'internal' ? null : this.midiAccess?.outputs.get(id) ?? null);
   }
+
+  // stato di loopMIDI e Komplete Kontrol (Windows), per avvisare quando l'uscita MIDI non può suonare
+  midiApps = signal<{ windows: boolean; loopmidi: { running: boolean; path: string }; kk: { running: boolean; path: string } } | null>(null);
+  async checkMidiApps() { try { this.midiApps.set(await api.midiApps()); } catch { /* anteprima */ } }
+  usesLoopMidi = computed(() => /studio agent|loopmidi/i.test(this.soundName()) || /studio agent|loopmidi/i.test(this.preferredSoundName()));
+  preferredSoundName = signal(this.preferredSound);
+  midiWarning = computed(() => {
+    const a = this.midiApps();
+    if (!a?.windows || !this.usesLoopMidi()) return '';
+    if (!a.loopmidi.running) return 'loopMIDI non è avviato: senza la sua porta le note non arrivano a Komplete Kontrol.';
+    if (!a.kk.running) return 'Komplete Kontrol non è aperto: le note arrivano alla porta ma nessuno le suona.';
+    return '';
+  });
+  async launchMidiApp(which: 'kk' | 'loopmidi') {
+    const r = await api.launchMidiApp(which);
+    if (!r.ok) { this.midiNotice.set(r.message || 'Avvio non riuscito'); return; }
+    setTimeout(() => { this.checkMidiApps(); if (which === 'loopmidi') this.refreshPorts(); }, 4000);
+  }
+
   chanMode = signal<ChannelMode>('single');
   setChanMode(m: ChannelMode) {
     this.stopPlay();
@@ -750,7 +785,7 @@ export class App {
     try { localStorage.setItem(LS + '.channels', m); } catch { /* ignora */ }
   }
   testSound() { this.piano.testNote(); }
-  async refreshMidi() { this.midiAccess = null; await this.loadMidi(); }
+  async refreshMidi() { this.refreshPorts(); await this.checkMidiApps(); }
 
   // ---------- forma del brano e arrangiamento (tools/arrange.py) ----------
   readonly arrStyles = [
