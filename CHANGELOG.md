@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.2 — 2026-11-27
+
+### Corretto
+- Il menu dei brani si chiude con Esc o con un clic fuori.
+- «Forma e arrangiamento»: se il brano non ha ancora una forma salvata, propone tutte le sezioni nell'ordine in cui sono scritte (o la progressione principale).
+- Allineamento della casella «Melodia di prova».
+
 ## 0.5.1 — 2026-11-27
 
 ### Corretto

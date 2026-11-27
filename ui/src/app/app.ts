@@ -48,6 +48,7 @@ const LS = 'studio-agent.ui';
   imports: [FormsModule, DecimalPipe],
   templateUrl: './app.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  host: { '(document:keydown.escape)': 'songMenu.set(false)', '(document:click)': 'onDocClick($event)' },
 })
 export class App {
   readonly phases = PHASES;
@@ -130,6 +131,11 @@ export class App {
     const pick = songs.find((s) => s.name === this.pendingSong) ?? songs[0];
     if (pick) this.selectSong(pick.name, false);
     this.checkPython();
+  }
+
+  /** Chiude il menu dei brani con un clic fuori dal menu. */
+  onDocClick(e: MouseEvent) {
+    if (this.songMenu() && !(e.target as HTMLElement).closest?.('.songpick')) this.songMenu.set(false);
   }
 
   // Python usato dagli strumenti (l'app sceglie quello che ha le librerie)
@@ -451,7 +457,10 @@ export class App {
     this.progKey.set(keyForMidi(s?.key || '') || '');
     this.progBpm.set((s?.tempo.match(/(\d+)\s*BPM/i) || [])[1] || '');
     this.harmMsg.set(null);
-    this.formList.set((s?.form || '').split(/[\s,]+/).filter(Boolean));
+    // forma salvata, altrimenti (consigliato) tutte le sezioni nell'ordine in cui sono scritte
+    const saved = (s?.form || '').split(/[\s,]+/).filter(Boolean);
+    const named = (s?.sections ?? []).map((x) => x.section).filter(Boolean);
+    this.formList.set(saved.length ? saved : named.length ? named : s?.progression ? ['Main'] : []);
     this.arrMsg.set(null);
     this.arrStyle.set(({ song: 'pop', ballad: 'ballad', symphony: 'chorale', film: 'arpeggio', chorale: 'chorale', jazz: 'pop' } as Record<string, string>)[typeFromText(s?.compositionType || '')] || 'pop');
   });

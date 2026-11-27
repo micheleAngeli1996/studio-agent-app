@@ -224,3 +224,4 @@ button.cell:hover:not(:disabled) { border-color: var(--line2); } button.cell:dis
 .ctab td, .ctab th { padding: 4px 6px; border-bottom: 1px solid var(--line); text-align: right; }
 .ctab td:first-child, .ctab th:first-child { text-align: left; font-family: var(--sans); }
 .spec .gl { fill: #6b6f76; font: 8px var(--mono, monospace); }
+.formbox .hform .check { align-self: flex-end; min-height: 40px; }
