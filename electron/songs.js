@@ -32,7 +32,8 @@ function parseSong(root, name) {
     const d = path.join(dir, sub);
     if (fs.existsSync(d)) for (const f of fs.readdirSync(d)) {
       const p = path.join(d, f);
-      if (fs.statSync(p).isFile()) files.push({ name: f, kind: sub, path: p });
+      const st = fs.statSync(p);
+      if (st.isFile()) files.push({ name: f, kind: sub, path: p, mtime: Math.round(st.mtimeMs) });
     }
   }
   return {

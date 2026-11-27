@@ -5,6 +5,7 @@ import { realize, tonalityFromText } from '../ui/src/app/roman';
 import { suggest, exerciseModels } from '../ui/src/app/suggestions';
 import { analyze, parseProgression, chordTones, isChordLine } from '../ui/src/app/harmony';
 import { voiceLead } from '../ui/src/app/piano';
+import { readMidi, secToQuarters, quartersToSec, stepAt, pairScores, clock } from '../ui/src/app/score-time';
 
 const line = (tpl: string, key: string) => realize(tpl, tonalityFromText(key)!).map((c) => c.chord).join(' ');
 
@@ -58,4 +59,32 @@ test('disposizione: basso grave, voci superiori vicine', () => {
   }
   const moves = vl.slice(1).map((v, i) => v.upper.reduce((s, n, k) => s + Math.abs(n - (vl[i].upper[k] ?? n)), 0));
   assert.ok(Math.max(...moves) <= 10, `movimento eccessivo: ${moves}`);
+});
+
+/** MIDI minimo: tempo 120 poi 60 dalla battuta 2; una traccia «Flute» (programma 73) con due note, running status. */
+function tinyMidi(): Uint8Array {
+  const trk = (b: number[]) => [0x4d, 0x54, 0x72, 0x6b, 0, 0, (b.length >> 8) & 255, b.length & 255, ...b];
+  const t0 = [0, 0xff, 0x51, 3, 0x07, 0xa1, 0x20, 0x8f, 0x00, 0xff, 0x51, 3, 0x0f, 0x42, 0x40, 0, 0xff, 0x2f, 0];
+  const t1 = [0, 0xff, 0x03, 5, ...[...'Flute'].map((c) => c.charCodeAt(0)), 0, 0xc0, 73, 0, 0x90, 69, 80, 0x83, 0x60, 69, 0, 0, 72, 80, 0x83, 0x60, 72, 0, 0, 0xff, 0x2f, 0];
+  return new Uint8Array([0x4d, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 1, 0, 2, 0x01, 0xe0, ...trk(t0), ...trk(t1)]);
+}
+
+test('partitura: tempo, parti e posizione del cursore dal MIDI', () => {
+  const m = readMidi(tinyMidi());
+  assert.equal(m.tpq, 480);
+  assert.deepEqual(m.parts, [{ name: 'Flute', channel: 0, program: 73, notes: 2 }]);
+  assert.equal(m.tempos.length, 2);
+  assert.equal(m.tempos[1].sec, 2);                  // 4 quarti a 120 = 2 s
+  assert.equal(secToQuarters(m, 1), 2);
+  assert.equal(secToQuarters(m, 3), 5);              // dopo il cambio: 1 quarto al secondo
+  assert.equal(quartersToSec(m, 5), 3);
+  assert.equal(stepAt([0, 1, 2, 4], 3.5), 2);
+  assert.equal(stepAt([0, 1, 2, 4], 4), 3);
+  assert.equal(clock(75.6), '1:15');
+});
+
+test('partitura: abbina MusicXML e MIDI con lo stesso nome', () => {
+  const f = (name: string, kind = 'score') => ({ name, kind, path: 'score/' + name });
+  assert.deepEqual(pairScores([f('Theme.musicxml'), f('Theme.mid'), f('Sketch.mid'), f('notes.txt'), f('x.mid', 'midi')]),
+    [{ name: 'Sketch', mid: 'score/Sketch.mid' }, { name: 'Theme', xml: 'score/Theme.musicxml', mid: 'score/Theme.mid' }]);
 });

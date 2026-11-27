@@ -22,9 +22,15 @@ L'app non contiene gli agenti: lavora sulla cartella **`studio-agent`** (con `.c
 - **Sviluppi armonici**: modelli di cadenze, settime, modulazioni e alterazioni cromatiche nella tonalità del brano, ordinati per tipo di composizione, con la pagina del De Ninno.
 - **Forma e arrangiamento**: ordine delle sezioni, stile di accompagnamento e melodia di prova; ascolto del brano e MIDI unico con marker per Cubase.
 - **Quattro voci ed esercizi**: realizzazione automatica (MusicXML per Dorico), esercizi di basso dato per livello, correzione con raddoppi, sensibile e settima.
+- **Partitura (Orchestrazione)**: le partiture di `score/` (MusicXML + MIDI con lo stesso nome) si leggono e si ascoltano dentro l'app: cursore che segue l'ascolto, clic su una battuta per ripartire da lì, tempo e zoom, parti da silenziare o ascoltare da sole, soundfont General MIDI incluso (o uno tuo .sf2/.sf3) oppure uscita su una porta MIDI.
 - **Fonte**: pagine dei manuali (con gli esempi musicali) nel pannello laterale e lettore PDF integrato; le citazioni nelle risposte sono cliccabili.
 - **Misure**: trascina un WAV per loudness, true peak, crest, correlazione e bande; registralo come versione del mix; confronto A/B con un'altra versione o con un brano di riferimento.
 - **Consumi**: token per agente, brano, fase e richiesta; limiti del piano (5 ore e settimanale).
+
+## Componenti di terze parti
+- [OpenSheetMusicDisplay](https://github.com/opensheetmusicdisplay/opensheetmusicdisplay) (BSD-3-Clause): disegno della partitura da MusicXML.
+- [spessasynth_lib](https://github.com/spessasus/spessasynth_lib) (Apache-2.0): sintetizzatore SoundFont e sequencer MIDI.
+- MuseScore General Lite (MIT; campioni da Fluid R3 Mono GM, MIT, e parti CC0/pubblico dominio), dal pacchetto npm `@librescore/sf3`: soundfont incluso, con il suo file di copyright nella cartella `soundfonts` dell'installazione.
 
 ## Sviluppo
 ```

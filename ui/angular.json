@@ -44,6 +44,11 @@
               {
                 "glob": "**/*",
                 "input": "public"
+              },
+              {
+                "glob": "spessasynth_processor.min.js",
+                "input": "node_modules/spessasynth_lib/dist",
+                "output": "/"
               }
             ],
             "styles": [
@@ -51,7 +56,10 @@
             ],
             "outputPath": {
               "base": "../ui-dist"
-            }
+            },
+            "allowedCommonJsDependencies": [
+              "opensheetmusicdisplay"
+            ]
           },
           "configurations": {
             "production": {

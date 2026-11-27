@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.0 — 2026-11-27
+
+### Nuovo
+- **Partitura integrata nella fase Orchestrazione**: un «Dorico minimo» per leggere e ascoltare. Il pannello «Partitura» apre i file di `score/` (il MusicXML e il MIDI con lo stesso nome, come li scrive `tools/score.py`), disegna la partitura su fondo carta e la fa ascoltare con un cursore che segue la musica e fa scorrere la pagina.
+  - Trasporto: ascolto e pausa (anche con la barra spaziatrice), ritorno all'inizio, barra di posizione, battuta corrente, tempo 50–125%, zoom.
+  - Clic su una battuta: l'ascolto riparte da lì.
+  - Parti: clic per silenziarne una, doppio clic (o Alt+clic) per ascoltarla da sola.
+  - Suono: soundfont General MIDI incluso (MuseScore General Lite) caricato al primo ascolto; «Soundfont…» per usarne uno tuo (.sf2/.sf3), oppure uscita su una porta MIDI (es. loopMIDI verso Cubase, un canale per parte).
+  - Quando l'agente rigenera la partitura, il pannello la ricarica da solo.
+
+### Corretto
+- `tools/score.py` (cartella studio-agent): le parti non avevano la chiave d'inizio, quindi Dorico e i lettori MusicXML mettevano tutto in chiave di violino; ora violoncelli, contrabbassi, fagotti, tromboni, tuba e timpani escono in chiave di basso, le viole in chiave di contralto, tenore e chitarra in violino 8vb (con `"clef"` per forzarla).
+
 ## 0.5.4 — 2026-11-27
 
 ### Corretto

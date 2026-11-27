@@ -250,3 +250,26 @@ button.cell:hover:not(:disabled) { border-color: var(--line2); } button.cell:dis
 .hbody .formbox { padding: 0; background: none; border: 0; }
 .warn { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 6px; background: rgba(224, 160, 60, .12); border: 1px solid rgba(224, 160, 60, .4); color: var(--text); }
 .warnlink { color: var(--accent); }
+
+/* ---------- Partitura integrata (Orchestrazione) ---------- */
+app-score { display: contents; }
+.score { flex: none; display: flex; flex-direction: column; background: var(--bg3); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.score.open { min-height: 240px; }
+.sstrip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 12px; min-height: 56px; }
+.htoggle { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 6px; background: none; border: 0; color: var(--text); cursor: pointer; }
+.htoggle .ttl { font: 600 12px var(--cond); letter-spacing: .1em; text-transform: uppercase; }
+.sstrip select, .sbar select { min-height: 36px; background: var(--bg); color: var(--text); border: 1px solid var(--line2); border-radius: 6px; padding: 0 8px; }
+.sstrip label, .sbar label { display: inline-flex; align-items: center; gap: 6px; }
+.sstrip .pos { min-width: 150px; color: var(--text2); }
+.sstrip .seek { flex: 1 1 140px; min-width: 120px; min-height: 0; padding: 0; accent-color: var(--accent); }
+.sstrip .szoom { display: inline-flex; align-items: center; gap: 4px; }
+.sstrip .szoom .btn.sq { width: 32px; height: 32px; min-height: 32px; }
+.sbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 6px 12px 8px; border-top: 1px solid var(--line); }
+.sbar .parts { flex: 1 1 auto; display: flex; flex-wrap: wrap; gap: 6px; }
+.sbar .chip { border-color: var(--accent-line); background: var(--accent-bg); color: var(--text); }
+.sbar .chip.off { border-color: var(--line2); background: transparent; color: var(--dim); text-decoration: line-through; }
+.sbar .btn.small { min-height: 34px; }
+.smsg { margin: 0; padding: 6px 12px; border-top: 1px solid var(--line); color: var(--text2); }
+/* la carta: la notazione resta nera su fondo chiaro, come in Dorico */
+.sheet { flex: 1; min-height: 0; overflow: auto; position: relative; background: #fbf9f3; color: #111; border-top: 1px solid var(--line); cursor: pointer; scrollbar-gutter: stable; }
+.sheet svg { display: block; }

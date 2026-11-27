@@ -1,7 +1,7 @@
 export interface Track { name: string; role: string; instrument: string; }
 export interface Decision { date: string; agent: string; text: string; }
 export interface MixVersion { date: string; file: string; lufs: string; truePeak: string; note: string; }
-export interface SongFile { name: string; kind: string; path: string; }
+export interface SongFile { name: string; kind: string; path: string; mtime?: number; }
 export interface Song {
   name: string; title: string; path: string; relPath: string; key: string; tempo: string; phase: string; goal: string;
   progression?: string; form?: string; sections?: { section: string; progression: string }[]; compositionType?: string; tracks: Track[]; decisions: Decision[]; versions: MixVersion[]; files: SongFile[];
@@ -40,6 +40,9 @@ export interface StudioApi {
   info(): Promise<{ root: string; hasAgents: boolean; version?: string }>;
   midiApps(): Promise<{ windows: boolean; loopmidi: { running: boolean; path: string }; kk: { running: boolean; path: string } }>;
   launchMidiApp(which: 'kk' | 'loopmidi'): Promise<{ ok: boolean; message?: string }>;
+  readFile(path: string): Promise<Uint8Array | null>;
+  soundfont(): Promise<{ name: string; custom: boolean; data: Uint8Array } | null>;
+  pickSoundfont(reset?: boolean): Promise<boolean>;
   pythonInfo(again?: boolean): Promise<{ path: string; version: string; missing: string[] }>;
   chooseRoot(): Promise<{ ok: boolean; root: string; message?: string }>;
   listSongs(): Promise<Song[]>;
@@ -79,7 +82,7 @@ function demoApi(): StudioApi {
       .map(([name, role]) => ({ name, role, instrument: '' })),
     decisions: [{ date: '2026-11-11', agent: 'regola di progetto', text: 'ordine delle tracce: melodia, accompagnamento armonico, basso e batteria' }],
     versions: [{ date: '2026-11-11', file: 'test/brano-prova/mix_problematic.wav', lufs: '−8,7', truePeak: '−0,08 dBTP', note: 'da rifare al mix' }],
-    files: [],
+    files: ['score_example.musicxml', 'score_example.mid'].map((name) => ({ name, kind: 'score', path: 'demo/' + name })),
   };
   const songs = [song];
   const log: UsageEntry[] = [];
@@ -88,6 +91,9 @@ function demoApi(): StudioApi {
     info: async () => ({ root: '(anteprima)', hasAgents: true, version: 'anteprima' }),
     midiApps: async () => ({ windows: false, loopmidi: { running: true, path: '' }, kk: { running: true, path: '' } }),
     launchMidiApp: async () => ({ ok: true }),
+    readFile: async (p) => { try { const r = await fetch(p); return r.ok ? new Uint8Array(await r.arrayBuffer()) : null; } catch { return null; } },
+    soundfont: async () => { try { const r = await fetch('demo/soundfont.sf3'); return r.ok ? { name: 'soundfont di prova', custom: false, data: new Uint8Array(await r.arrayBuffer()) } : null; } catch { return null; } },
+    pickSoundfont: async () => false,
     pythonInfo: async () => ({ path: 'python', version: '3.13.5', missing: [] }),
     chooseRoot: async () => ({ ok: false, root: '(anteprima)', message: 'Disponibile solo nell\'app.' }),
     listSongs: async () => structuredClone(songs),

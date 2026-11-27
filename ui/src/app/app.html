@@ -326,6 +326,7 @@
               [attr.aria-valuenow]="harmHeight()" (pointerdown)="startResize($event)" (keydown)="resizeKey($event)" (dblclick)="harmHeight.set(320)"><span></span></div>
           }
         }
+        @if (phaseId() === 'orchestrazione') { <app-score [song]="songName()" [files]="song()?.files ?? []" /> }
         <div class="thread" #thread>
           @if (!conv().msgs.length) {
             <div class="empty"><p>{{ phase().hint }}.</p>

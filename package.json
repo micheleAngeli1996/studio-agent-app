@@ -1,7 +1,7 @@
 {
   "name": "studio-agent-app",
   "productName": "Studio Agent",
-  "version": "0.5.4",
+  "version": "0.6.0",
   "description": "Console di regia per gli agenti di produzione musicale (Cubase 15 Pro, Dorico 6 Pro) basati su Claude Code",
   "main": "electron/main.js",
   "author": "Michele Angeli",
@@ -22,6 +22,7 @@
     "electron-updater": "^6.3.9"
   },
   "devDependencies": {
+    "@librescore/sf3": "0.8.0",
     "electron": "^39.0.0",
     "electron-builder": "^26.0.12"
   },
@@ -66,6 +67,16 @@
         "owner": "micheleAngeli1996",
         "repo": "studio-agent-app",
         "releaseType": "release"
+      }
+    ],
+    "extraResources": [
+      {
+        "from": "node_modules/@librescore/sf3/MuseScore_General_Lite.sf3.wasm",
+        "to": "soundfonts/MuseScore_General_Lite.sf3"
+      },
+      {
+        "from": "node_modules/@librescore/sf3/MuseScore_General_Lite.copyright",
+        "to": "soundfonts/MuseScore_General_Lite.copyright.txt"
       }
     ]
   }

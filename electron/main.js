@@ -180,6 +180,30 @@ ipcMain.handle('midi:launch', async (_e, which) => {
   return err ? { ok: false, message: err } : { ok: true };
 });
 
+// ---------- Partitura: file e soundfont per il lettore integrato ----------
+const SF_BUNDLED = app.isPackaged
+  ? path.join(process.resourcesPath, 'soundfonts', 'MuseScore_General_Lite.sf3')
+  : path.join(APP_DIR, 'node_modules', '@librescore', 'sf3', 'MuseScore_General_Lite.sf3.wasm');
+ipcMain.handle('file:read', (_e, p) => {
+  if (!inside(p) || !/\.(musicxml|xml|mid|midi)$/i.test(p)) return null;
+  try { return new Uint8Array(fs.readFileSync(p)); } catch { return null; }
+});
+ipcMain.handle('soundfont:get', () => {
+  const custom = settings().soundfont;
+  for (const [p, own] of [[custom, true], [SF_BUNDLED, false]]) {
+    if (p && fs.existsSync(p)) {
+      try { return { name: own ? path.basename(p) : 'MuseScore General (GM)', custom: own, data: new Uint8Array(fs.readFileSync(p)) }; } catch { /* prova il successivo */ }
+    }
+  }
+  return null;
+});
+ipcMain.handle('soundfont:pick', async (_e, reset) => {
+  const s = settings();
+  if (reset) { delete s.soundfont; saveSettings(s); return true; }
+  const r = await dialog.showOpenDialog(win, { title: 'Scegli un soundfont', properties: ['openFile'], filters: [{ name: 'SoundFont', extensions: ['sf2', 'sf3', 'dls'] }] });
+  if (r.canceled || !r.filePaths[0]) return false;
+  s.soundfont = r.filePaths[0]; saveSettings(s); return true;
+});
 ipcMain.handle('python:info', async (_e, again) => { if (again) pyDetect = null; return ensurePython(); });
 ipcMain.handle('settings:chooseRoot', () => chooseRoot(win));
 ipcMain.handle('songs:list', () => songs.listSongs(ROOT));

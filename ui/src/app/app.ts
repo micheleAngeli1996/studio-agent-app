@@ -5,6 +5,7 @@ import { api, isDemo, AgentEvent, Song, UsageEntry, Limits, Comparison } from '.
 import { mdToHtml, firstSentence, linkCitations, linkChordLines } from './md';
 import { analyze as analyzeProg, keyForMidi, BOOKS, chordTones, parseProgression, isChordLine, ChordTones } from './harmony';
 import { Piano, Style, ChannelMode } from './piano';
+import { ScoreView } from './score';
 import { suggest, exerciseModels, EXERCISE_LEVELS, COMPOSITION_TYPES, TECHNIQUES, typeFromText, homeLabel, CompositionType, Technique, Suggestion } from './suggestions';
 
 const NOTE_PC: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
@@ -47,7 +48,7 @@ const lsSet = (k: string, v: string) => { try { localStorage.setItem(LS + k, v);
 
 @Component({
   selector: 'app-root',
-  imports: [FormsModule, DecimalPipe],
+  imports: [FormsModule, DecimalPipe, ScoreView],
   templateUrl: './app.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '(document:keydown.escape)': 'songMenu.set(false)', '(document:click)': 'onDocClick($event)', '(window:resize)': 'onResize()' },

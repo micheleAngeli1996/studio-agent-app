@@ -1,0 +1,63 @@
+<section class="score" aria-label="Partitura" [class.open]="open()" [style.height.px]="open() ? effHeight() : null" (keydown)="onKey($event)">
+  <div class="sstrip">
+    <button class="htoggle" type="button" (click)="toggle()" [attr.aria-expanded]="open()">
+      <svg aria-hidden="true" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path [attr.d]="open() ? 'M3 6l5 5 5-5' : 'M6 3l5 5-5 5'"/></svg>
+      <span class="ttl">Partitura</span>
+    </button>
+    @if (pairs().length) {
+      @if (pairs().length > 1) {
+        <select class="mono" aria-label="Partitura da aprire" [ngModel]="current()?.name" (ngModelChange)="select($event)">
+          @for (p of pairs(); track p.name) { <option [value]="p.name">{{ p.name }}</option> }
+        </select>
+      } @else { <span class="mono small">{{ current()?.name }}</span> }
+      <button class="btn sq" type="button" (click)="togglePlay()" [disabled]="!current()?.mid || !!busy()" [attr.aria-label]="playing() ? 'Pausa' : 'Ascolta'" [title]="playing() ? 'Pausa (spazio)' : 'Ascolta (spazio)'">
+        @if (playing()) { <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="2" width="3.5" height="12" rx="1"/><rect x="9.5" y="2" width="3.5" height="12" rx="1"/></svg> }
+        @else { <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M4 2.5v11l9.5-5.5z"/></svg> }
+      </button>
+      <button class="btn sq" type="button" (click)="stop()" [disabled]="!current()?.mid" aria-label="Torna all'inizio" title="Torna all'inizio">
+        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="1.5"/></svg>
+      </button>
+      <span class="mono small pos">@if (measures()) { bat. {{ measure() }}/{{ measures() }} · }{{ clock(pos()) }} / {{ clock(dur()) }}</span>
+      <input class="seek" type="range" min="0" [max]="dur() || 1" step="0.1" [value]="pos()" (input)="seek(+$any($event.target).value)" aria-label="Posizione" [disabled]="!dur()">
+      <label class="small dim">tempo
+        <select [ngModel]="rate()" (ngModelChange)="setRate(+$event)" aria-label="Velocità di ascolto">
+          @for (r of rates; track r) { <option [value]="r">{{ r * 100 }}%</option> }
+        </select>
+      </label>
+      <span class="szoom">
+        <button class="btn sq" type="button" (click)="setZoom(-0.1)" aria-label="Riduci" title="Riduci">−</button>
+        <span class="mono small">{{ (zoom() * 100).toFixed(0) }}%</span>
+        <button class="btn sq" type="button" (click)="setZoom(0.1)" aria-label="Ingrandisci" title="Ingrandisci">+</button>
+      </span>
+    } @else {
+      <span class="dim small">Nessuna partitura in <span class="mono">score/</span>: chiedi all'agente di scriverne una (la scrive con <span class="mono">tools/score.py</span>, MusicXML + MIDI).</span>
+    }
+  </div>
+  @if (open() && pairs().length) {
+    <div class="sbar">
+      @if (parts().length) {
+        <div class="parts" role="group" aria-label="Parti: clic per silenziare, Alt+clic o doppio clic per ascoltarla da sola">
+          @for (p of parts(); track p.channel) {
+            <button type="button" class="chip" [class.off]="isMuted(p.channel)" [attr.aria-pressed]="!isMuted(p.channel)" (click)="toggleMute(p.channel, $event)" (dblclick)="solo(p.channel)"
+              [title]="(isMuted(p.channel) ? 'Silenziata' : 'In ascolto') + ' · canale ' + (p.channel + 1) + ' · Alt+clic: solo'">{{ p.name }}</button>
+          }
+        </div>
+      }
+      <label class="small dim out">uscita
+        <select [ngModel]="output()" (ngModelChange)="setOutput($event)" (focus)="refreshOutputs()" aria-label="Uscita dell'ascolto">
+          <option value="sf">Soundfont interno@if (bank()) { · {{ bank() }} }</option>
+          @for (o of outputs(); track o.id) { <option [value]="o.id">MIDI · {{ o.name }}</option> }
+          @if (output() !== 'sf' && !outputs().length) { <option [value]="output()">MIDI (porta salvata)</option> }
+        </select>
+      </label>
+      <button class="btn ghost2 small" type="button" (click)="chooseSoundfont()" title="Usa un tuo soundfont .sf2/.sf3 al posto di quello incluso">Soundfont…</button>
+      @if (bank() && output() === 'sf') { <button class="link small" type="button" (click)="chooseSoundfont(true)">incluso</button> }
+    </div>
+  }
+  @if (open() && (busy() || msg())) { <p class="smsg small" role="status">{{ busy() || msg() }}</p> }
+  <div class="sheet" #sheet [hidden]="!open() || !pairs().length || !current()?.xml" (click)="onSheetClick($event)" title="Clic su una battuta per ascoltare da lì"></div>
+</section>
+@if (open()) {
+  <div class="hsplit" role="separator" aria-orientation="horizontal" aria-label="Ridimensiona la partitura (frecce su e giù)" tabindex="0"
+    [attr.aria-valuenow]="effHeight()" (pointerdown)="startResize($event)" (keydown)="resizeKey($event)" (dblclick)="resetHeight()"><span></span></div>
+}
