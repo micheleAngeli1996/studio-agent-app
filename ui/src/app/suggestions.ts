@@ -96,7 +96,7 @@ const MODELS: Model[] = [
     how: 'Lo stesso modello (V7→accordo) ripetuto a gradi diversi: ogni ripetizione tonicizza un nuovo grado, la sequenza fa da ponte verso la cadenza.',
     weight: { song: 1, ballad: 2, symphony: 3, film: 2, chorale: 2, jazz: 2 }, ref: { book: 'armonia2', page: 79, label: 'progressioni modulanti' } },
   { id: 'mod-enharmonic', title: 'Modulazione enarmonica con la 7ª diminuita', technique: 'modulazione',
-    maj: 'I viio7/V [iii] viio7 Cad64 V7 i', min: 'i viio7 [iii] viio7 Cad64 V7 i',
+    maj: 'I viio7/V [iii] viio7 i V7 i', min: 'i viio7 [iii] viio7 i V7 i',
     how: 'La 7ª diminuita è simmetrica: rileggendo enarmonicamente una sua nota come sensibile, lo stesso accordo risolve in una tonalità lontana.',
     weight: { song: 0, ballad: 1, symphony: 3, film: 3, chorale: 2, jazz: 1 }, ref: { book: 'armonia1', page: 188, label: 'trasformazione enarmonica' } },
   { id: 'mod-mediant', title: 'Mediante cromatica', technique: 'modulazione',
@@ -155,4 +155,45 @@ export function suggest(keyText: string, type: CompositionType, technique?: Tech
 export function homeLabel(keyText: string) {
   const t = tonalityFromText(keyText);
   return t ? tonalityLabel(t) : 'C major';
+}
+
+// ---------- esercizi di basso dato per livello ----------
+export const EXERCISE_LEVELS = [
+  { id: 1, label: '1 · Triadi e rivolti' },
+  { id: 2, label: '2 · Accordi di settima' },
+  { id: 3, label: '3 · Modulazioni' },
+  { id: 4, label: '4 · Alterazioni cromatiche' },
+] as const;
+
+interface Drill { title: string; maj: string; min: string; ref: Ref; }
+const DRILLS: Record<number, Drill[]> = {
+  1: [
+    { title: 'Cadenza perfetta', maj: 'I IV V I', min: 'i iv V i', ref: { book: 'armonia1', page: 109, label: 'cadenze' } },
+    { title: 'Giro con il VI grado', maj: 'I vi IV V I', min: 'i VI iv V i', ref: { book: 'armonia1', page: 62, label: 'raddoppi' } },
+    { title: 'Primo rivolto del II', maj: 'I ii6 V I', min: 'i iio6 V i', ref: { book: 'armonia1', page: 62, label: 'raddoppi' } },
+    { title: 'Rivolti nel basso', maj: 'I I6 IV V I', min: 'i i6 iv V i', ref: { book: 'armonia1', page: 62, label: 'raddoppi' } },
+    { title: '6/4 cadenzale', maj: 'I vi ii6 Cad64 V I', min: 'i VI iio6 Cad64 V i', ref: { book: 'armonia1', page: 109, label: 'cadenze' } },
+    { title: 'Cadenza evitata', maj: 'I IV V vi IV V I', min: 'i iv V VI iv V i', ref: { book: 'armonia1', page: 116, label: 'cadenza evitata' } },
+  ],
+  2: [
+    { title: 'II di settima e dominante', maj: 'I ii65 V7 I', min: 'i iio65 V7 i', ref: { book: 'armonia1', page: 204, label: 'risoluzione della 7ª' } },
+    { title: 'Rivolti della dominante', maj: 'I V42 I6 V65 I', min: 'i V42 i6 V65 i', ref: { book: 'armonia1', page: 209, label: '7ª di 1ª specie' } },
+    { title: 'Settime secondarie', maj: 'I IV ii7 V7 I', min: 'i iv iiø7 V7 i', ref: { book: 'armonia1', page: 223, label: 'settime secondarie' } },
+    { title: 'Dominante della dominante', maj: 'I IV V7/V V7 I', min: 'i iv V7/V V7 i', ref: { book: 'armonia1', page: 223, label: 'settime secondarie' } },
+    { title: '7ª diminuita sulla sensibile', maj: 'I viio7 I ii65 V7 I', min: 'i viio7 i iio65 V7 i', ref: { book: 'armonia1', page: 309, label: '7ª diminuita' } },
+  ],
+  3: [], 4: [],
+};
+
+/** Esercizi del livello, realizzati nella tonalità indicata (i livelli 3 e 4 usano i modelli degli sviluppi). */
+export function exerciseModels(level: number, keyText: string): Suggestion[] {
+  const t: Tonality = tonalityFromText(keyText) || { letter: 0, pc: 0, minor: false };
+  if (level === 3 || level === 4) {
+    const ids = level === 3 ? ['mod-dominant', 'mod-relative', 'mod-sequence', 'mod-enharmonic'] : ['neapolitan', 'aug6', 'aug6-fr', 'dim7-passing', 'phrygian'];
+    return suggest(keyText, 'chorale').filter((s) => ids.includes(s.id));
+  }
+  return (DRILLS[level] || []).map((d, i) => {
+    const chords = realize(t.minor ? d.min : d.maj, t);
+    return { id: `drill-${level}-${i}`, title: d.title, technique: 'cadenza' as Technique, how: '', score: 3, chords, line: chords.map((c) => c.chord).join(' '), ref: d.ref, keyChanges: [] };
+  });
 }

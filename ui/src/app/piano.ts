@@ -3,6 +3,11 @@ import { ChordTones } from './harmony';
 
 export type Style = 'block' | 'arp';
 export interface PlayOptions { bpm: number; style: Style; loop: boolean; }
+/** Nota di un arrangiamento: [inizio in tempi, durata in tempi, nota MIDI, velocity 1-127, canale 0-15]. */
+export type NoteEvent = [number, number, number, number, number];
+export type CcEvent = [number, number, number, number];
+/** 'separate': Piano 1, Electric Bass 2, melodia 3, Drums 10.  'single': tutto sul canale 1, senza batteria. */
+export type ChannelMode = 'separate' | 'single';
 
 /** Disposizione: basso nell'ottava 2–3, tre/quattro voci superiori tra G3 e G5 con il minimo movimento. */
 export function voiceLead(chords: ChordTones[]): { bass: number; upper: number[] }[] {
@@ -85,12 +90,19 @@ export class Piano {
 
   // ---------- uscita MIDI (Komplete Kontrol o altri strumenti) ----------
   private midi: MIDIOutput | null = null;
-  private sent: { note: number; on: number }[] = [];
+  private sent: { note: number; on: number; ch: number }[] = [];
+  channelMode: ChannelMode = 'single';
+  /** Pedale di risonanza (CC64) al cambio di accordo, quando si suona via MIDI. */
+  pedal = true;
   setMidiOutput(o: MIDIOutput | null) { this.stop(); this.midi = o; }
   get usingMidi() { return !!this.midi; }
 
-  private note(midi: number, when: number, dur: number, vel: number) {
-    if (this.midi) return this.midiNote(midi, when, dur, vel);
+  private note(midi: number, when: number, dur: number, vel: number, ch = 0) {
+    if (this.midi) {
+      if (this.channelMode === 'single') { if (ch === 9) return; ch = 0; }
+      return this.midiNote(midi, when, dur, vel, ch);
+    }
+    if (ch === 9) return this.drum(midi, when, vel);
     const ctx = this.ctx!;
     const f = 440 * Math.pow(2, (midi - 69) / 12);
     const gain = ctx.createGain();
@@ -122,19 +134,108 @@ export class Piano {
   }
 
   /** Nota MIDI sul canale 1, con il tempo dell'orologio audio convertito in quello di performance.now(). */
-  private midiNote(n: number, when: number, dur: number, vel: number) {
+  private midiNote(n: number, when: number, dur: number, vel: number, ch = 0) {
     const delay = Math.max(0, when - this.ctx!.currentTime) * 1000;
     if (delay > 150) {                 // note lontane (arpeggi): programmate con un timer, che «Ferma» annulla
-      this.timers.push(window.setTimeout(() => this.midi && this.midiNote(n, this.ctx!.currentTime + 0.05, dur, vel), delay - 50));
+      this.timers.push(window.setTimeout(() => this.midi && this.midiNote(n, this.ctx!.currentTime + 0.05, dur, vel, ch), delay - 50));
       return;
     }
     const on = performance.now() + delay;
     const v = Math.max(1, Math.min(127, Math.round(vel * 127)));
-    this.midi!.send([0x90, n, v], on);
-    this.midi!.send([0x80, n, 0], on + dur * 1000);
-    this.sent.push({ note: n, on });
+    this.midi!.send([0x90 | ch, n, v], on);
+    this.midi!.send([0x80 | ch, n, 0], on + dur * 1000);
+    this.sent.push({ note: n, on, ch });
     const now = performance.now();
     this.sent = this.sent.filter((x) => x.on > now - 20000);
+  }
+
+  /** Control change via MIDI (es. CC64 pedale) all'istante «when» dell'orologio audio. */
+  private cc(ctl: number, val: number, when: number, ch = 0) {
+    if (!this.midi) return;
+    if (this.channelMode === 'single') { if (ch === 9) return; ch = 0; }
+    const delay = Math.max(0, when - this.ctx!.currentTime) * 1000;
+    if (delay > 150) { this.timers.push(window.setTimeout(() => this.cc(ctl, val, this.ctx!.currentTime + 0.05, ch), delay - 50)); return; }
+    this.midi.send([0xB0 | ch, ctl, val], performance.now() + delay);
+  }
+
+  /** Batteria sintetizzata per il pianoforte interno (cassa, rullante, charleston, piatti). */
+  private drum(n: number, when: number, vel: number) {
+    const ctx = this.ctx!;
+    const g = ctx.createGain();
+    g.connect(this.out);
+    const amp = 0.5 * vel;
+    if (n === 35 || n === 36) {
+      const o = ctx.createOscillator();
+      o.frequency.setValueAtTime(140, when);
+      o.frequency.exponentialRampToValueAtTime(45, when + 0.12);
+      g.gain.setValueAtTime(amp, when);
+      g.gain.exponentialRampToValueAtTime(0.001, when + 0.32);
+      o.connect(g); o.start(when); o.stop(when + 0.35);
+      return;
+    }
+    const long = n === 49 || n === 57 || n === 51 || n === 46;
+    const len = long ? (n === 51 ? 0.6 : 1.4) : n === 42 ? 0.06 : n === 37 ? 0.05 : 0.18;
+    const buf = this.noise ?? (this.noise = (() => {
+      const b = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+      const d = b.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      return b;
+    })());
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const f = ctx.createBiquadFilter();
+    if (n === 38 || n === 40) { f.type = 'bandpass'; f.frequency.value = 1900; f.Q.value = 0.7; }
+    else if (n === 37) { f.type = 'bandpass'; f.frequency.value = 3200; f.Q.value = 4; }
+    else { f.type = 'highpass'; f.frequency.value = n === 51 ? 5000 : 7000; }
+    src.connect(f); f.connect(g);
+    g.gain.setValueAtTime(amp * (n === 42 ? 0.5 : long ? 0.35 : 0.9), when);
+    g.gain.exponentialRampToValueAtTime(0.001, when + len);
+    src.start(when); src.stop(when + len + 0.05);
+    if (n === 38 || n === 40) {                       // corpo del rullante
+      const o = ctx.createOscillator(); const og = ctx.createGain();
+      o.frequency.value = 190; og.gain.setValueAtTime(amp * 0.5, when); og.gain.exponentialRampToValueAtTime(0.001, when + 0.1);
+      o.connect(og); og.connect(this.out); o.start(when); o.stop(when + 0.12);
+    }
+  }
+  private noise: AudioBuffer | null = null;
+
+  /** Nota di prova (C4) per verificare l'uscita scelta. */
+  testNote() {
+    this.init();
+    const t = this.ctx!.currentTime + 0.03;
+    [48, 60, 64, 67].forEach((n, i) => this.note(n, t + i * 0.12, 1.2, 0.7));
+  }
+
+  /** Suona un arrangiamento già calcolato (tools/arrange.py), programmando le note a blocchi di 0,4 s.
+   *  onPos riceve la posizione in tempi; -1 alla fine. */
+  playEvents(notes: NoteEvent[], ccs: CcEvent[], bpm: number, onPos: (beat: number) => void) {
+    this.stop();
+    if (!notes.length) return;
+    this.init();
+    const session = ++this.session;
+    const spb = 60 / Math.max(30, Math.min(240, bpm || 90));
+    const t0 = this.ctx!.currentTime + 0.1;
+    const evs = [...notes].sort((a, b) => a[0] - b[0]);
+    const cs = [...ccs].sort((a, b) => a[0] - b[0]);
+    const end = Math.max(...evs.map((e) => e[0] + e[1]));
+    let i = 0, j = 0;
+    const tick = () => {
+      if (session !== this.session) return;
+      const horizon = this.ctx!.currentTime + 0.4;
+      while (i < evs.length && t0 + evs[i][0] * spb < horizon) {
+        const [t, d, n, v, ch] = evs[i++];
+        this.note(n, t0 + t * spb, d * spb, v / 127, ch);
+      }
+      while (j < cs.length && t0 + cs[j][0] * spb < horizon) {
+        const [t, ctl, val, ch] = cs[j++];
+        this.cc(ctl, val, t0 + t * spb, ch);
+      }
+      const pos = (this.ctx!.currentTime - t0) / spb;
+      onPos(Math.max(0, pos));
+      if (pos > end + 0.5) { onPos(-1); return; }
+      this.timers.push(window.setTimeout(tick, 120));
+    };
+    tick();
   }
 
   /** Suona un accordo singolo (anteprima al clic). */
@@ -168,9 +269,11 @@ export class Piano {
         return;
       }
       const c = chords[i], v = vl[i], len = c.beats * beat;
+      if (this.midi && this.pedal) { this.cc(64, 0, t - 0.01); this.cc(64, 127, t + 0.03); }
+      const accent = (k: number) => 0.58 + (Math.random() - 0.5) * 0.06 + (k === v.upper.length - 1 ? 0.04 : 0);
       if (opt.style === 'block') {
         this.note(v.bass, t, len * 0.96, 0.78);
-        v.upper.forEach((n, k) => this.note(n, t + k * 0.01, len * 0.94, 0.58));
+        v.upper.forEach((n, k) => this.note(n, t + k * 0.01, len * 0.94, accent(k)));
       } else {
         // arpeggio in crome: basso, poi le voci superiori su e giù
         const seq = [...v.upper, ...v.upper.slice(1, -1).reverse()];
@@ -209,8 +312,8 @@ export class Piano {
     if (this.midi) {
       // note-off subito per le note suonate e di nuovo all'istante previsto per quelle già in coda
       const now = performance.now();
-      for (const x of this.sent) { this.midi.send([0x80, x.note, 0]); if (x.on > now) this.midi.send([0x80, x.note, 0], x.on + 2); }
-      this.midi.send([0xB0, 123, 0]);
+      for (const x of this.sent) { this.midi.send([0x80 | x.ch, x.note, 0]); if (x.on > now) this.midi.send([0x80 | x.ch, x.note, 0], x.on + 2); }
+      for (const ch of new Set([0, ...this.sent.map((x) => x.ch)])) { this.midi.send([0xB0 | ch, 64, 0]); this.midi.send([0xB0 | ch, 123, 0]); }
       this.sent = [];
     }
     if (!this.ctx) return;

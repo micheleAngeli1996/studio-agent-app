@@ -1,11 +1,11 @@
 import { Component, computed, effect, signal, untracked, ChangeDetectionStrategy, ElementRef, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DecimalPipe } from '@angular/common';
-import { api, isDemo, AgentEvent, Song, UsageEntry, Limits } from './api';
+import { api, isDemo, AgentEvent, Song, UsageEntry, Limits, Comparison } from './api';
 import { mdToHtml, firstSentence, linkCitations, linkChordLines } from './md';
 import { analyze as analyzeProg, keyForMidi, BOOKS, chordTones, parseProgression, isChordLine, ChordTones } from './harmony';
-import { Piano, Style } from './piano';
-import { suggest, COMPOSITION_TYPES, TECHNIQUES, typeFromText, homeLabel, CompositionType, Technique, Suggestion } from './suggestions';
+import { Piano, Style, ChannelMode } from './piano';
+import { suggest, exerciseModels, EXERCISE_LEVELS, COMPOSITION_TYPES, TECHNIQUES, typeFromText, homeLabel, CompositionType, Technique, Suggestion } from './suggestions';
 
 const NOTE_PC: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
 const ITA: Record<string, string> = { do: 'C', re: 'D', mi: 'E', fa: 'F', sol: 'G', la: 'A', si: 'B' };
@@ -275,6 +275,7 @@ export class App {
   async analyze(path: string) {
     if (!path) return;
     this.measureFile.set(path);
+    this.comparison.set(null);
     this.measuring.set(true);
     this.measureError.set('');
     this.rightOpen.set(true);
@@ -283,6 +284,32 @@ export class App {
     if (r.ok && r.data) this.measure.set(r.data); else { this.measure.set(null); this.measureError.set(r.message || 'Analisi non riuscita'); }
   }
   async pick() { const p = await api.pickAudio(); if (p) this.analyze(p); }
+
+  // ---------- confronto A/B (tools/compare.py) ----------
+  comparison = signal<Comparison | null>(null);
+  comparing = signal(false);
+  /** Versioni del mix registrate, escluso il file misurato ora (che fa da A). */
+  otherVersions = computed(() => (this.song()?.versions ?? []).filter((v) => v.file && this.fileName(v.file) !== this.fileName(this.measureFile())));
+  async compareWith(b: string, ref = false) {
+    const a = this.measureFile();
+    if (!a || !b) return;
+    this.comparing.set(true);
+    this.comparison.set(null);
+    const r = await api.compareAudio({ song: this.song()?.name, a, b, ref });
+    this.comparing.set(false);
+    this.comparison.set(r);
+  }
+  async compareReference() { const p = await api.pickAudio(); if (p) this.compareWith(p, true); }
+  /** Spettri in terzi d'ottava come polilinee SVG (asse x logaritmico 20 Hz-20 kHz). */
+  spectrumPath(pts: [number, number][] | undefined, w = 300, h = 120) {
+    if (!pts?.length) return '';
+    const c = this.comparison();
+    const all = [...(c?.spectrumA ?? []), ...(c?.spectrumB ?? [])].map((p) => p[1]);
+    const lo = Math.min(...all), hi = Math.max(...all);
+    const x = (f: number) => (Math.log10(f / 20) / Math.log10(1000)) * w;
+    const y = (v: number) => h - ((v - lo) / (hi - lo || 1)) * (h - 8) - 4;
+    return pts.map((p, i) => `${i ? 'L' : 'M'}${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join(' ');
+  }
   onDrop(e: DragEvent) {
     e.preventDefault(); this.dragOver.set(false);
     const f = e.dataTransfer?.files?.[0];
@@ -324,6 +351,17 @@ export class App {
     this.send(`Analizza "${f}" con tools/analyze.py: è pronto per il passo successivo? Indica al massimo tre interventi in ordine di priorità.`, `Analisi di ${this.fileName(f)}`);
   }
 
+
+  askCompare() {
+    const c = this.comparison(); if (!c?.ok) return;
+    if (this.phaseId() !== 'mix' && this.phaseId() !== 'master') this.phaseId.set('mix');
+    const rows = [...(c.rows ?? []).map((r) => `${r.label}: A ${r.a} / B ${r.b} (${r.d > 0 ? '+' : ''}${r.d} ${r.unit})`),
+      ...(c.bands ?? []).map((b) => `${b.name}: ${b.d > 0 ? '+' : ''}${b.d} dB`)].join('; ');
+    this.send(`Confronto A/B: A = "${c.a}", B = "${c.b}"${c.ref ? ' (brano di riferimento)' : ' (versione precedente)'}. Misure (tools/compare.py): ${rows}. `
+      + `Cosa cambieresti in A, in ordine di priorità (al massimo tre interventi, con plugin e parametri di Cubase 15)?${c.ref ? ' Ricorda che con un riferimento conta la forma dello spettro, non il volume.' : ''}`, `Confronto ${c.a} / ${c.b}`);
+  }
+  log10(x: number) { return Math.log10(x); }
+  abs(x: number) { return Math.abs(x); }
 
   // ---------- armonia ----------
   readonly books = BOOKS;
@@ -400,6 +438,9 @@ export class App {
     this.progKey.set(keyForMidi(s?.key || '') || '');
     this.progBpm.set((s?.tempo.match(/(\d+)\s*BPM/i) || [])[1] || '');
     this.harmMsg.set(null);
+    this.formList.set((s?.form || '').split(/[\s,]+/).filter(Boolean));
+    this.arrMsg.set(null);
+    this.arrStyle.set(({ song: 'pop', ballad: 'ballad', symphony: 'chorale', film: 'arpeggio', chorale: 'chorale', jazz: 'pop' } as Record<string, string>)[typeFromText(s?.compositionType || '')] || 'pop');
   });
   private lastPhase = '';
   private syncBook = effect(() => {                     // libro predefinito solo quando si cambia fase
@@ -453,10 +494,15 @@ export class App {
     this.runVoices();
   }
 
+  readonly exerciseLevels = EXERCISE_LEVELS;
+  exLevel = signal(1);
+  private lastExercise = '';
   async newExercise() {
-    const pool = suggest(this.sugKey(), 'chorale').filter((x) => x.score >= 2 && x.chords.length >= 4 && x.chords.length <= 8);
+    const pool = exerciseModels(this.exLevel(), this.sugKey()).filter((x) => x.chords.length >= 3 && x.chords.length <= 9);
     if (!pool.length) return;
-    const pick = pool[Math.floor(Math.random() * pool.length)];
+    const fresh = pool.filter((x) => x.id !== this.lastExercise);
+    const pick = (fresh.length ? fresh : pool)[Math.floor(Math.random() * (fresh.length || pool.length))];
+    this.lastExercise = pick.id;
     this.satbBusy.set(true);
     const r = await api.realizeSatb({ progression: pick.line, key: this.sugKey(), write: false });
     this.satbBusy.set(false);
@@ -466,6 +512,29 @@ export class App {
     this.voiceReport.set({ ok: true, text: `Basso dato in ${this.sugHome()}: scrivi Soprano, Alto e Tenor seguendo i gradi, poi «Controlla».` });
     this.voicesOpen.set(true);
   }
+  /** Esporta l'esercizio per Dorico: basso numerato e tre righi vuoti (Soprano, Alto, Tenor). */
+  async exportExercise() {
+    const e = this.exercise(); if (!e) return;
+    const s = this.song();
+    const name = 'exercise-' + e.title.toLowerCase().normalize('NFD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const r = await api.realizeSatb({ song: s?.name, progression: e.line, key: this.sugKey(), name, write: true, exercise: true });
+    if (!r.ok) { this.voiceReport.set({ ok: false, text: r.message || 'Esportazione non riuscita' }); return; }
+    const xml = r.files?.find((f) => /\.musicxml$/i.test(f));
+    this.harmMsg.set({ ok: true, text: 'Esercizio per Dorico (basso numerato, voci superiori da scrivere):', path: xml });
+    if (s) this.songs.set(await api.listSongs());
+  }
+
+  /** Analizza un MIDI esistente e porta la progressione nella sezione corrente (da salvare a mano). */
+  async analyzeMidi() {
+    const r = await api.analyzeMidi(this.song()?.name);
+    if (r.canceled) return;
+    if (!r.ok) { this.harmMsg.set({ ok: false, text: r.message || 'Analisi non riuscita' }); return; }
+    this.prog.set(r.progression || '');
+    if (r.key) this.progKey.set(r.key);
+    this.harmOpen.set(true);
+    this.harmMsg.set({ ok: true, text: `Analisi di ${this.fileName(r.file || '')}: ${r.bars} battute, tonalità stimata ${r.key}. È un'analisi automatica (note di passaggio e ritardi possono ingannarla): controllala, poi «Salva nella memoria».` });
+  }
+
   showSolution() { const e = this.exercise(); if (e) { this.voices.set({ ...e.solution }); this.runVoices(); } }
   playVoices() {
     const v = this.voices();
@@ -478,31 +547,23 @@ export class App {
     this.piano.playVoices(parts as number[][], this.bpmNum(), (i) => { if (i < 0) this.playing.set(''); });
   }
 
-  /** Note che non appartengono all'accordo previsto dall'esercizio. */
-  private chordReport(): string {
-    const e = this.exercise(); if (!e) return '';
-    const v = this.voices();
-    const parts = [v.s, v.a, v.t, v.b].map((x) => x.trim().split(/\s+/).filter(Boolean));
-    const lines: string[] = [];
-    e.chords.forEach((c, i) => {
-      const ct = chordTones(c.chord); if (!ct) return;
-      const pcs = new Set(ct.intervals.map((x) => (ct.root + x) % 12));
-      const got = parts.map((p) => noteMidi(p[i] || '')).filter((n): n is number => n !== null).map((n) => n % 12);
-      const foreign = got.filter((p) => !pcs.has(p));
-      const missing = [...pcs].filter((p) => !got.includes(p) && ct.intervals.length <= 4 && (p - ct.root + 12) % 12 !== 7);
-      if (foreign.length) lines.push(`[ERRORE] accordo ${i + 1} (${c.chord}, ${c.numeral}): note estranee all'accordo`);
-      else if (missing.length) lines.push(`[AVVISO] accordo ${i + 1} (${c.chord}, ${c.numeral}): manca una nota essenziale (terza o settima)`);
-    });
-    return lines.length ? lines.join('\n') + '\n\n' : 'Tutti gli accordi sono completi e corretti.\n\n';
+  /** Rapporto del controllo con le pagine del De Ninno cliccabili (aprono la Fonte). */
+  reportHtml(t: string) {
+    return linkCitations(t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'));
   }
 
   async runVoices() {
     const v = this.voices();
     if (![v.s, v.a, v.t, v.b].every((x) => x.trim())) { this.voiceReport.set({ ok: false, text: 'Compila tutte e quattro le voci.' }); return; }
     this.voiceReport.set({ ok: true, text: 'Controllo…' });
-    const r = await api.checkVoices(v);
-    const pre = this.chordReport();
-    this.voiceReport.set(r.ok ? { ok: true, errors: r.errors || pre.includes('[ERRORE]'), text: pre + (r.report || '') } : { ok: false, text: r.message || 'Controllo non riuscito' });
+    // accordi di riferimento: quelli dell'esercizio, oppure la progressione se ha tante posizioni quante le voci
+    const n = v.s.trim().split(/\s+/).length;
+    const e = this.exercise();
+    const fromProg = this.cells().filter((c) => c.ok).map((c) => c.name);
+    const chords = e ? e.chords.map((c) => c.chord) : fromProg.length === n ? fromProg : [];
+    const r = await api.checkVoices({ ...v, chords: chords.join(' ') || undefined, key: e ? this.sugKey() : this.progKey() || undefined });
+    const note = chords.length ? '' : 'Controllo solo della condotta: per raddoppi, sensibile e settima servono tanti accordi quante posizioni.\n\n';
+    this.voiceReport.set(r.ok ? { ok: true, errors: r.errors, text: note + (r.report || '') } : { ok: false, text: r.message || 'Controllo non riuscito' });
   }
 
   askHarmony() {
@@ -607,6 +668,11 @@ export class App {
       let saved = ''; try { saved = localStorage.getItem(LS + '.sound') || ''; } catch { /* ignora */ }
       const hit = this.midiOutputs().find((o) => o.name === saved);
       if (hit) this.setSound(hit.id);
+      else if (!saved) {                       // primo avvio: se c'è la porta di loopMIDI «Studio Agent» la usa
+        const lp = this.midiOutputs().find((o) => /studio agent|loopmidi/i.test(o.name));
+        if (lp) this.setSound(lp.id);
+      }
+      try { const cm = localStorage.getItem(LS + '.channels') as ChannelMode | null; if (cm) this.setChanMode(cm); } catch { /* ignora */ }
     } catch (e: any) { this.midiError.set('MIDI non disponibile: ' + (e?.message || e)); }
   }
   setSound(id: string) {
@@ -616,6 +682,80 @@ export class App {
     this.piano.setMidiOutput(out);
     try { localStorage.setItem(LS + '.sound', out?.name || ''); } catch { /* ignora */ }
   }
+  chanMode = signal<ChannelMode>('single');
+  setChanMode(m: ChannelMode) {
+    this.stopPlay();
+    this.chanMode.set(m);
+    this.piano.channelMode = m;
+    try { localStorage.setItem(LS + '.channels', m); } catch { /* ignora */ }
+  }
+  testSound() { this.piano.testNote(); }
+  async refreshMidi() { this.midiAccess = null; await this.loadMidi(); }
+
+  // ---------- forma del brano e arrangiamento (tools/arrange.py) ----------
+  readonly arrStyles = [
+    { id: 'pop', label: 'Pop' }, { id: 'ballad', label: 'Ballata' }, { id: 'rock', label: 'Rock' },
+    { id: 'waltz', label: 'Valzer (3/4)' }, { id: 'arpeggio', label: 'Arpeggio (chitarra)' }, { id: 'chorale', label: 'Corale' },
+  ];
+  readonly melodyInstruments = ['Flute', 'Violin', 'Oboe', 'Clarinet', 'Trumpet', 'Vibraphone', 'Electric Piano', 'Acoustic Guitar', 'Lead Synth', 'Choir Aahs'];
+  formOpen = signal(false);
+  formList = signal<string[]>([]);
+  arrStyle = signal('pop');
+  arrMelody = signal(true);
+  arrInstrument = signal('Flute');
+  arrBusy = signal(false);
+  arrMsg = signal<{ ok: boolean; text: string; path?: string } | null>(null);
+  arrPos = signal(-1);
+  private arrMarkers = signal<{ t: number; name: string }[]>([]);
+  private arrBeats = signal(4);
+  arrSection = computed(() => {
+    const p = this.arrPos(); if (p < 0) return '';
+    const ms = this.arrMarkers().filter((m) => m.t <= p + 1e-6);
+    return ms.length ? `${ms[ms.length - 1].name} · b. ${Math.floor(p / this.arrBeats()) + 1}` : '';
+  });
+  /** Nomi utilizzabili nella forma: le sezioni con una progressione («Main» è la principale). */
+  formNames = computed(() => this.sectionTabs().filter((t) => t.progression || t.section).map((t) => t.section || 'Main'));
+  formDirty = computed(() => this.formList().join(' ') !== (this.song()?.form || '').split(/[\s,]+/).filter(Boolean).join(' '));
+  addToForm(n: string) { if (n) this.formList.update((l) => [...l, n]); }
+  removeFromForm(i: number) { this.formList.update((l) => l.filter((_, k) => k !== i)); }
+  moveInForm(i: number, d: number) {
+    this.formList.update((l) => {
+      const j = i + d; if (j < 0 || j >= l.length) return l;
+      const c = [...l]; [c[i], c[j]] = [c[j], c[i]]; return c;
+    });
+  }
+  async saveForm() {
+    const s = this.song(); if (!s) return;
+    try { this.replaceSong(await api.setForm(s.name, this.formList().join(' '))); this.arrMsg.set({ ok: true, text: 'Forma salvata nella memoria del brano.' }); }
+    catch (e: any) { this.arrMsg.set({ ok: false, text: this.errText(e) }); }
+  }
+  async arrange(write: boolean) {
+    const s = this.song();
+    if (!s) { this.arrMsg.set({ ok: false, text: 'Apri un brano: forma e sezioni si leggono dalla sua memoria.' }); return; }
+    if (this.progDirty()) { this.arrMsg.set({ ok: false, text: `Salva prima la progressione «${this.sectionLabel(this.section())}»: l'arrangiamento usa quelle salvate nella memoria del brano.` }); return; }
+    if (!write && this.playing() === 'arr') { this.stopPlay(); return; }
+    this.arrBusy.set(true);
+    const r = await api.arrange({ song: s.name, style: this.arrStyle(), melody: this.arrMelody(), instrument: this.arrInstrument(), form: this.formList().join(' '), write });
+    this.arrBusy.set(false);
+    if (!r.ok) { this.arrMsg.set({ ok: false, text: r.message || 'Arrangiamento non riuscito' }); return; }
+    const notes: string[] = [];
+    if (r.auto?.length) notes.push(`ricavate in automatico: ${r.auto.join(', ')}`);
+    if (r.missing?.length) notes.push(`senza progressione, saltate: ${r.missing.join(', ')}`);
+    const info = `${(r.form || []).join(' → ')} · ${Math.round((r.length || 0) / (r.beatsPerBar || 4))} battute${notes.length ? ' (' + notes.join('; ') + ')' : ''}`;
+    if (write) {
+      this.arrMsg.set({ ok: true, text: `MIDI del brano pronto: ${info}. Tracce ${this.arrMelody() ? this.arrInstrument() + ', ' : ''}Piano, Electric Bass, Drums e marker delle sezioni:`, path: r.file || undefined });
+      this.songs.set(await api.listSongs());
+      return;
+    }
+    this.arrMsg.set({ ok: true, text: info });
+    this.arrMarkers.set(r.markers || []);
+    this.arrBeats.set(r.beatsPerBar || 4);
+    this.playing.set('arr');
+    this.piano.playEvents(r.notes || [], r.cc || [], r.bpm || this.bpmNum(), (pos) => {
+      if (pos < 0) { if (this.playing() === 'arr') this.playing.set(''); this.arrPos.set(-1); } else this.arrPos.set(pos);
+    });
+  }
+
   soundName = computed(() => this.midiOutputs().find((o) => o.id === this.soundId())?.name ?? 'Pianoforte interno');
   /** La porta della tastiera manda le note allo strumento fisico, non al software Komplete Kontrol. */
   soundHint = computed(() => {
@@ -623,9 +763,12 @@ export class App {
     if (/^KOMPLETE KONTROL( EXT)? - \d/i.test(n)) return 'Questa porta va alla tastiera Komplete Kontrol, non al programma: per sentire The Grandeur o BBCSO Piano usa una porta virtuale (loopMIDI) attivata come ingresso in Komplete Kontrol.';
     if (/Komplete Kontrol DAW/i.test(n)) return 'Porta di integrazione DAW della tastiera: non suona lo strumento.';
     if (/UR816|UR-C/i.test(n)) return 'Uscita MIDI fisica della UR816 (DIN): suona solo se c\'è uno strumento collegato al connettore MIDI OUT.';
-    return n === 'Pianoforte interno' ? '' : 'In Komplete Kontrol: Preferenze → MIDI → attiva questa porta come ingresso, poi carica The Grandeur o BBCSO Piano.';
+    if (n === 'Pianoforte interno') return '';
+    return this.chanMode() === 'separate'
+      ? 'Canali separati: Piano 1, Electric Bass 2, melodia 3, Drums 10. Komplete Kontrol suona tutti i canali con lo stesso strumento: per timbri diversi usa Kontakt in modalità multi o Cubase. In Komplete Kontrol: Preferenze → MIDI → attiva questa porta come ingresso.'
+      : 'Un solo canale: tutto sul canale 1 con lo strumento caricato (es. The Grandeur), batteria esclusa. In Komplete Kontrol: Preferenze → MIDI → attiva questa porta come ingresso.';
   });
-  stopPlay() { this.piano.stop(); this.playing.set(''); this.nowIdx.set(-1); this.sugIdx.set(-1); }
+  stopPlay() { this.piano.stop(); this.playing.set(''); this.nowIdx.set(-1); this.sugIdx.set(-1); this.arrPos.set(-1); }
 
   // ---------- sviluppi armonici ----------
   readonly compTypes = COMPOSITION_TYPES;

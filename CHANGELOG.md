@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.5.0 — 2026-11-27
+
+### Aggiunto
+- **Forma e arrangiamento del brano** (Armonia → «Forma e arrangiamento»): ordine delle sezioni (Intro, Verse, Chorus…) salvato in SONG.md come `- Forma: ...`; Intro e Outro senza progressione si ricavano dalle sezioni vicine.
+- **Pattern di accompagnamento per stile**: pop, ballata, rock, valzer (3/4), arpeggio, corale; tracce Piano, Electric Bass e Drums con intensità diversa per sezione, rullate e piatti ai cambi di sezione, pedale nelle ballate.
+- **Melodia di prova** (Flute, Violin, Oboe…): note dell'accordo sui tempi forti, passaggi sui deboli; la stessa sezione ripetuta ha la stessa melodia.
+- **«Ascolta il brano»** nell'app (con batteria sintetizzata nel pianoforte interno) e **«Crea il MIDI del brano»**: un solo MIDI con marker delle sezioni, tempo, metro e armatura, pronto per Cubase (`tools/arrange.py`).
+- **Ascolto via MIDI**: canali separati (Piano 1, Electric Bass 2, melodia 3, Drums 10) oppure tutto su un canale; pedale di risonanza ai cambi di accordo; dinamica meno meccanica; «Prova suono», «Aggiorna porte» e scelta automatica della porta loopMIDI «Studio Agent».
+- **Esercizi per livello**: triadi e rivolti, settime, modulazioni, alterazioni cromatiche; «Esporta per Dorico» scrive il basso numerato con le voci superiori vuote.
+- **Correzione completa a quattro voci**: oltre a quinte e ottave, note estranee, terza o settima mancanti, raddoppi (sensibile, settima, terza), risoluzione di sensibile e settima, con il link alla pagina del De Ninno.
+- **Analizza un MIDI**: da un file MIDI alla progressione e alla tonalità stimata (`tools/midi2chords.py`).
+- **Confronto A/B nel pannello Misure**: con un'altra versione del mix o con un brano di riferimento; spettri in terzi d'ottava, tabella delle differenze, sintesi e «Chiedi al mixer cosa cambiare».
+- **Test automatici** della logica musicale (`npm test`, eseguiti dalla CI).
+
+### Corretto
+- Modulazione enarmonica e 7ª diminuita negli esercizi: niente più sensibile al basso che salta.
+- Python avviato dall'app in UTF-8 (nomi con lettere accentate nei risultati).
+
 ## 0.4.2 — 2026-11-15
 
 ### Corretto

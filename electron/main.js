@@ -79,7 +79,7 @@ ipcMain.handle('audio:pick', async () => {
 
 function runPy(args) {
   return new Promise((resolve) => {
-    const child = spawn(config().pythonCommand, args, { cwd: ROOT, windowsHide: true });
+    const child = spawn(config().pythonCommand, args, { cwd: ROOT, windowsHide: true, env: { ...process.env, PYTHONIOENCODING: 'utf-8' } });
     let out = ''; let err = '';
     child.stdout.on('data', (d) => { out += d; });
     child.stderr.on('data', (d) => { err += d; });
@@ -91,6 +91,23 @@ function lastLine(t) { return String(t).trim().split(/\r?\n/).filter(Boolean).po
 
 ipcMain.handle('songs:progression', (_e, song, prog, sec) => songs.setProgression(ROOT, song, prog, sec));
 ipcMain.handle('songs:type', (_e, song, type) => songs.setBriefField(ROOT, song, 'Tipo di composizione', type));
+ipcMain.handle('songs:form', (_e, song, form) => songs.setBriefField(ROOT, song, 'Forma', form, 'Struttura e armonia'));
+
+// Arrangiamento del brano (tools/arrange.py): eventi per l'ascolto e, se richiesto, il MIDI unico in midi/
+ipcMain.handle('harmony:arrange', async (_e, { song, style, melody, instrument, form, write }) => {
+  if (!song) return { ok: false, message: 'Apri un brano: l\'arrangiamento legge forma e sezioni da SONG.md' };
+  const args = [path.join(ROOT, 'tools', 'arrange.py'), '--song', path.join(ROOT, 'songs', song), '--style', style || 'pop', '--json'];
+  if (melody) args.push('--melody', '--melody-instrument', instrument || 'Flute');
+  if (form) args.push('--form', form);
+  if (write) {
+    const st = String(style || 'pop');
+    args.push('-o', path.join(ROOT, 'songs', song, 'midi', `${song} - ${st[0].toUpperCase() + st.slice(1)} Arrangement.mid`));
+  }
+  const r = await runPy(args);
+  const line = r.out.trim().split(/\r?\n/).reverse().find((l) => l.startsWith('{'));
+  if (!line) return { ok: false, message: lastLine(r.err) || 'Arrangiamento non riuscito' };
+  return JSON.parse(line);
+});
 
 ipcMain.handle('harmony:midi', async (_e, { song, progression, bpm, key, name }) => {
   const base = String(name || 'progression').replace(/[^A-Za-z0-9 _-]/g, '').trim() || 'progression';
@@ -105,9 +122,23 @@ ipcMain.handle('harmony:midi', async (_e, { song, progression, bpm, key, name })
   return { ok: true, path: out, message: r.out.trim() };
 });
 
+// Analisi di un MIDI esistente (tools/midi2chords.py): progressione e tonalità stimata
+ipcMain.handle('harmony:analyzeMidi', async (_e, song) => {
+  const r0 = await dialog.showOpenDialog(win, {
+    title: 'Scegli un file MIDI da analizzare', defaultPath: song ? path.join(ROOT, 'songs', song, 'midi') : ROOT,
+    properties: ['openFile'], filters: [{ name: 'MIDI', extensions: ['mid', 'midi'] }],
+  });
+  if (r0.canceled || !r0.filePaths[0]) return { ok: false, canceled: true };
+  const r = await runPy([path.join(ROOT, 'tools', 'midi2chords.py'), r0.filePaths[0], '--json']);
+  const line = r.out.trim().split(/\r?\n/).reverse().find((l) => l.startsWith('{'));
+  if (!line) return { ok: false, message: lastLine(r.err) || 'Analisi non riuscita' };
+  return { ...JSON.parse(line), file: r0.filePaths[0] };
+});
+
 // Realizzazione a quattro voci (tools/satb.py): voci in JSON e, se richiesto, MusicXML + MIDI in score/
-ipcMain.handle('harmony:satb', async (_e, { song, progression, bpm, key, name, write }) => {
+ipcMain.handle('harmony:satb', async (_e, { song, progression, bpm, key, name, write, exercise }) => {
   const args = [path.join(ROOT, 'tools', 'satb.py'), progression, '--json'];
+  if (exercise) args.push('--exercise');
   if (key) args.push('--key', key);
   if (bpm) args.push('--bpm', String(bpm));
   if (write) {
@@ -123,7 +154,10 @@ ipcMain.handle('harmony:satb', async (_e, { song, progression, bpm, key, name, w
 });
 
 ipcMain.handle('harmony:voices', async (_e, v) => {
-  const r = await runPy([path.join(ROOT, 'tools', 'voice_check.py'), '--s', v.s, '--a', v.a, '--t', v.t, '--b', v.b]);
+  const args = [path.join(ROOT, 'tools', 'voice_check.py'), '--s', v.s, '--a', v.a, '--t', v.t, '--b', v.b];
+  if (v.chords) args.push('--chords', v.chords);           // controllo di raddoppi, sensibile e settima
+  if (v.key) args.push('--key', v.key);
+  const r = await runPy(args);
   if (r.code !== 0 && r.code !== 1) return { ok: false, message: lastLine(r.err) || lastLine(r.out) || 'Controllo non riuscito' };
   return { ok: true, errors: r.code === 1, report: r.out.trim() };
 });
@@ -177,6 +211,28 @@ ipcMain.handle('audio:analyze', (_e, filePath) => new Promise((resolve) => {
     try { resolve({ ok: true, data: JSON.parse(out) }); } catch { resolve({ ok: false, message: 'Risposta dello strumento di analisi non leggibile' }); }
   });
 }));
+
+// Confronto tra due file audio (tools/compare.py): due versioni del mix o il mix e un riferimento
+function resolveAudio(song, p) {
+  if (!p) return '';
+  if (path.isAbsolute(p) && fs.existsSync(p)) return p;
+  const base = song ? path.join(ROOT, 'songs', song) : ROOT;
+  for (const d of ['', 'audio', 'stems', 'reports', 'mix']) {
+    const c = path.join(base, d, p);
+    if (fs.existsSync(c)) return c;
+  }
+  return '';
+}
+ipcMain.handle('audio:compare', async (_e, { song, a, b, ref }) => {
+  const pa = resolveAudio(song, a), pb = resolveAudio(song, b);
+  if (!pa || !pb) return { ok: false, message: `File non trovato: ${!pa ? a : b} (cerco nella cartella del brano e in audio/)` };
+  const args = [path.join(ROOT, 'tools', 'compare.py'), pa, pb, '--json'];
+  if (ref) args.push('--ref');
+  const r = await runPy(args);
+  const line = r.out.trim().split(/\r?\n/).reverse().find((l) => l.startsWith('{'));
+  if (!line) return { ok: false, message: lastLine(r.err) || 'Confronto non riuscito' };
+  return JSON.parse(line);
+});
 
 ipcMain.handle('agent:ask', (e, req) => {
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

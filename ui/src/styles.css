@@ -203,3 +203,24 @@ button.cell:hover:not(:disabled) { border-color: var(--line2); } button.cell:dis
 .inspt { color: var(--text2); line-height: 1.5; }
 .exer { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; background: var(--card); border-radius: 6px; }
 .play-btn { min-width: 196px; justify-content: center; }
+.small-btn { min-height: 32px; padding: 0 12px; font-size: 13px; }
+.formbox { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
+.formrow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.fchip { display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px 2px 6px; border: 1px solid var(--line2); border-radius: 15px; font-size: 13px; }
+.fchip.cur { border-color: var(--accent); background: var(--accent-bg); }
+.fchip .ic { background: none; border: 0; color: var(--dim); min-width: 22px; min-height: 26px; font-size: 14px; cursor: pointer; }
+.fchip .ic:hover:not(:disabled) { color: var(--text); } .fchip .ic:disabled { opacity: .3; cursor: default; }
+.accent { color: var(--accent); }
+.lvl { min-height: 36px; font-size: 13px; }
+.cmp { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+.spec { width: 100%; height: auto; background: var(--bg2); border-radius: 6px; }
+.spec .grid { stroke: #2c2f35; stroke-width: 1; }
+.spec .sa { fill: none; stroke: var(--accent); stroke-width: 2; }
+.spec .sb { fill: none; stroke: #8a8d93; stroke-width: 1.6; }
+.specx { display: flex; justify-content: space-between; font-size: 10px; margin-top: -4px; }
+.leg { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; } .leg.a { background: var(--accent); } .leg.b { background: #8a8d93; }
+.sum { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.5; color: var(--text2); }
+.ctab { width: 100%; border-collapse: collapse; font-size: 12px; }
+.ctab td, .ctab th { padding: 4px 6px; border-bottom: 1px solid var(--line); text-align: right; }
+.ctab td:first-child, .ctab th:first-child { text-align: left; font-family: var(--sans); }
+.spec .gl { fill: #6b6f76; font: 8px var(--mono, monospace); }

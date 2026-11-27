@@ -4,7 +4,7 @@ export interface MixVersion { date: string; file: string; lufs: string; truePeak
 export interface SongFile { name: string; kind: string; path: string; }
 export interface Song {
   name: string; title: string; path: string; relPath: string; key: string; tempo: string; phase: string; goal: string;
-  progression?: string; sections?: { section: string; progression: string }[]; compositionType?: string; tracks: Track[]; decisions: Decision[]; versions: MixVersion[]; files: SongFile[];
+  progression?: string; form?: string; sections?: { section: string; progression: string }[]; compositionType?: string; tracks: Track[]; decisions: Decision[]; versions: MixVersion[]; files: SongFile[];
 }
 export interface UsageEntry {
   ts: string; agent: string; song: string; phase: string; request: string; input: number; output: number;
@@ -23,6 +23,16 @@ export type AgentEvent =
 export interface LimitWindow { utilization: number; resetsAt: number; status: string; }
 export interface Limits { fiveHour: LimitWindow | null; sevenDay: LimitWindow | null; at?: string; }
 export interface AskRequest { agent: string; prompt: string; resume?: string; song?: string; phase?: string; label?: string; }
+export interface Arrangement {
+  ok: boolean; message?: string; bpm?: number; beatsPerBar?: number; length?: number; form?: string[]; missing?: string[]; auto?: string[];
+  markers?: { t: number; name: string }[]; notes?: [number, number, number, number, number][]; cc?: [number, number, number, number][]; file?: string | null;
+}
+export interface Comparison {
+  ok: boolean; message?: string; a?: string; b?: string; ref?: boolean;
+  rows?: { label: string; a: number; b: number; d: number; unit: string }[];
+  bands?: { name: string; a: number; b: number; d: number }[];
+  summary?: string[]; spectrumA?: [number, number][]; spectrumB?: [number, number][];
+}
 export interface Satb { ok: boolean; s?: string; a?: string; t?: string; b?: string; chords?: string[]; files?: string[]; message?: string; }
 export interface Analysis { ok: boolean; data?: Record<string, any>; message?: string; }
 
@@ -36,8 +46,12 @@ export interface StudioApi {
   setProgression(song: string, prog: string, section?: string): Promise<Song>;
   setCompositionType(song: string, type: string): Promise<Song>;
   exportMidi(req: { song?: string; progression: string; bpm?: string; key?: string; name?: string }): Promise<{ ok: boolean; path?: string; message?: string }>;
-  checkVoices(v: { s: string; a: string; t: string; b: string }): Promise<{ ok: boolean; errors?: boolean; report?: string; message?: string }>;
-  realizeSatb(req: { song?: string; progression: string; bpm?: string; key?: string; name?: string; write?: boolean }): Promise<Satb>;
+  checkVoices(v: { s: string; a: string; t: string; b: string; chords?: string; key?: string }): Promise<{ ok: boolean; errors?: boolean; report?: string; message?: string }>;
+  arrange(req: { song?: string; style: string; melody?: boolean; instrument?: string; form?: string; write?: boolean }): Promise<Arrangement>;
+  setForm(song: string, form: string): Promise<Song>;
+  realizeSatb(req: { song?: string; progression: string; bpm?: string; key?: string; name?: string; write?: boolean; exercise?: boolean }): Promise<Satb>;
+  compareAudio(req: { song?: string; a: string; b: string; ref?: boolean }): Promise<Comparison>;
+  analyzeMidi(song?: string): Promise<{ ok: boolean; canceled?: boolean; message?: string; progression?: string; key?: string; bars?: number; file?: string }>;
   bookPage(book: string, page: number): Promise<{ ok: boolean; dataUrl?: string; message?: string }>;
   openBook(book: string): Promise<string>;
   openReader(book: string, page: number): Promise<{ ok: boolean; message?: string }>;
@@ -84,6 +98,16 @@ function demoApi(): StudioApi {
     },
     setCompositionType: async (n, type) => { const s = songs.find((x) => x.name === n)!; s.compositionType = type; return structuredClone(s); },
     exportMidi: async (r) => ({ ok: true, path: `songs/${r.song}/midi/${r.name || 'progression'}.mid`, message: 'Anteprima: nessun file scritto' }),
+    arrange: async () => ({ ok: true, bpm: 90, beatsPerBar: 4, length: 8, form: ['Main'], missing: [], auto: [], markers: [{ t: 0, name: 'Main' }],
+      notes: [[0, 2, 45, 90, 1], [0, 2, 60, 70, 0], [0, 2, 64, 70, 0], [0, 2, 69, 70, 0], [0, 0.25, 36, 100, 9], [1, 0.25, 38, 90, 9], [2, 2, 41, 90, 1], [2, 2, 60, 70, 0], [2, 2, 65, 70, 0], [2, 2, 69, 70, 0], [4, 4, 45, 90, 1], [4, 4, 64, 70, 0], [4, 4, 69, 70, 0], [4, 4, 72, 70, 0]], cc: [], file: null }),
+    compareAudio: async (r) => ({ ok: true, a: 'mix_v2.wav', b: r.b, ref: !!r.ref,
+      rows: [{ label: 'Loudness integrato', a: -14.2, b: -16.1, d: 1.9, unit: 'LU' }, { label: 'True peak', a: -1.2, b: -2.4, d: 1.2, unit: 'dB' }, { label: 'Crest factor', a: 9.1, b: 11.4, d: -2.3, unit: 'dB' }],
+      bands: [{ name: 'bassi 60-250 Hz', a: -6.1, b: -9.4, d: 3.3 }, { name: 'medi 500 Hz-2 kHz', a: -8.2, b: -7.9, d: -0.3 }],
+      summary: ['A è più forte di B di 1.9 LU.', 'bassi 60-250 Hz: A ha 3.3 dB in più di B.'],
+      spectrumA: Array.from({ length: 31 }, (_, i) => [1000 * 2 ** ((i - 17) / 3), -20 - Math.abs(i - 10) * 1.2] as [number, number]),
+      spectrumB: Array.from({ length: 31 }, (_, i) => [1000 * 2 ** ((i - 17) / 3), -21 - Math.abs(i - 12) * 1.1] as [number, number]) }),
+    analyzeMidi: async () => ({ ok: true, progression: 'Am F C G | Am F E7 Am', key: 'Am', bars: 8, file: 'demo.mid' }),
+    setForm: async (n, form) => { const s = songs.find((x) => x.name === n)!; s.form = form; return structuredClone(s); },
     realizeSatb: async () => ({ ok: true, s: 'A4 A4 G#4 A4', a: 'E4 F4 E4 E4', t: 'C4 D4 D4 C4', b: 'A2 D3 E2 A2', files: [] }),
     checkVoices: async () => ({ ok: true, errors: true, report: '[ERRORE] accordo 2: quinte parallele tra Tenore e Basso (accordi 2-3: Do4/Fa3 -> Re4/Sol3)\n\n1 errori, 0 avvisi su 4 accordi.' }),
     bookPage: async () => ({ ok: false, message: 'Anteprima: le pagine dei manuali si vedono solo nell\'app.' }),

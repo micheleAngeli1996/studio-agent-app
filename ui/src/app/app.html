@@ -170,6 +170,15 @@
                       <option value="internal">Pianoforte interno</option>
                       @for (o of midiOutputs(); track o.id) { <option [value]="o.id">MIDI · {{ o.name }}</option> }
                     </select></label>
+                  @if (soundId() !== 'internal') {
+                    <label class="sound">Canali
+                      <select [ngModel]="chanMode()" (ngModelChange)="setChanMode($event)" aria-label="Canali MIDI">
+                        <option value="single">Uno solo (strumento caricato)</option>
+                        <option value="separate">Separati (1 Piano · 2 Bass · 3 melodia · 10 Drums)</option>
+                      </select></label>
+                  }
+                  <button class="btn small-btn" (click)="testSound()" title="Suona un accordo di prova sull'uscita scelta">Prova suono</button>
+                  <button class="link small" (click)="refreshMidi()" title="Rileggi le porte MIDI (dopo aver avviato loopMIDI)">Aggiorna porte</button>
                   <span class="dim small mono">{{ bpmNum() }} BPM · clic su un accordo per sentirlo</span>
                 </div>
                 @if (soundHint() || midiError()) { <p class="dim small hint">{{ midiError() || soundHint() }}</p> }
@@ -186,11 +195,56 @@
               <div class="acts">
                 <button class="btn primary" (click)="exportMidi()" [disabled]="!prog().trim()">Esporta MIDI per Cubase e Dorico</button>
                 <button class="btn" (click)="askHarmony()" [disabled]="!prog().trim() || !!busyId()">Chiedi l'analisi</button>
+                <button class="btn" (click)="analyzeMidi()" title="Ricava accordi e tonalità da un file MIDI">Analizza un MIDI</button>
                 @if (song()) { <button class="btn" (click)="saveProgression()" [disabled]="!progDirty() || !prog().trim()">Salva nella memoria</button> }
                 <button class="btn" (click)="realizeSatb()" [disabled]="!prog().trim() || satbBusy()">Realizza a quattro voci</button>
                 <button class="btn" (click)="voicesOpen.set(!voicesOpen())" [attr.aria-expanded]="voicesOpen()">Quattro voci ed esercizi</button>
+                <button class="btn" (click)="formOpen.set(!formOpen())" [attr.aria-expanded]="formOpen()">Forma e arrangiamento</button>
                 <button class="btn ghost2" (click)="goOrchestration()">Passa all'orchestrazione →</button>
               </div>
+              @if (formOpen()) {
+                <div class="formbox">
+                  <p class="dim small">Ordine delle sezioni nel brano. Le sezioni vengono dalle schede qui sopra; Intro e Outro senza progressione si ricavano dalle sezioni vicine.</p>
+                  <div class="formrow" role="list" aria-label="Forma del brano">
+                    @for (f of formList(); track $index) {
+                      <span class="fchip" role="listitem" [class.cur]="playing() === 'arr' && arrSection().startsWith(f + ' ')">
+                        <button class="ic" (click)="moveInForm($index, -1)" [disabled]="$index === 0" [attr.aria-label]="'Sposta ' + f + ' prima'">‹</button>
+                        <span class="mono">{{ f }}</span>
+                        <button class="ic" (click)="moveInForm($index, 1)" [disabled]="$index === formList().length - 1" [attr.aria-label]="'Sposta ' + f + ' dopo'">›</button>
+                        <button class="ic" (click)="removeFromForm($index)" [attr.aria-label]="'Togli ' + f">×</button>
+                      </span>
+                    } @empty { <span class="dim small">Forma vuota: aggiungi le sezioni nell'ordine in cui si suonano.</span> }
+                    <select class="addsec" aria-label="Aggiungi alla forma" (change)="addToForm($any($event.target).value); $any($event.target).value = ''">
+                      <option value="">+ Aggiungi</option>
+                      @for (n of formNames(); track n) { <option [value]="n">{{ n === 'Main' ? 'Main (principale)' : n }}</option> }
+                      @if (!formNames().includes('Intro')) { <option value="Intro">Intro (automatica)</option> }
+                      @if (!formNames().includes('Outro')) { <option value="Outro">Outro (automatica)</option> }
+                    </select>
+                    @if (song()) { <button class="btn small-btn" (click)="saveForm()" [disabled]="!formDirty()">Salva forma</button> }
+                  </div>
+                  <div class="hform">
+                    <label>Stile
+                      <select [ngModel]="arrStyle()" (ngModelChange)="arrStyle.set($event)">
+                        @for (st of arrStyles; track st.id) { <option [value]="st.id">{{ st.label }}</option> }
+                      </select></label>
+                    <label class="check"><input type="checkbox" [ngModel]="arrMelody()" (ngModelChange)="arrMelody.set($event)"> Melodia di prova</label>
+                    @if (arrMelody()) {
+                      <label>Strumento della melodia
+                        <select [ngModel]="arrInstrument()" (ngModelChange)="arrInstrument.set($event)">
+                          @for (m of melodyInstruments; track m) { <option [value]="m">{{ m }}</option> }
+                        </select></label>
+                    }
+                  </div>
+                  <div class="acts">
+                    <button class="btn primary" (click)="arrange(false)" [disabled]="arrBusy() || !formList().length">{{ playing() === 'arr' ? 'Ferma' : 'Ascolta il brano' }}</button>
+                    <button class="btn" (click)="arrange(true)" [disabled]="arrBusy() || !formList().length">Crea il MIDI del brano</button>
+                    @if (playing() === 'arr' && arrSection()) { <span class="mono small accent">{{ arrSection() }}</span> }
+                  </div>
+                  @if (arrMsg(); as m) {
+                    <p class="hmsg" [class.errtxt]="!m.ok">{{ m.text }}@if (m.path) { <button class="link mono" (click)="openMidi(m.path)">{{ fileName(m.path) }}</button> }</p>
+                  }
+                </div>
+              }
               @if (harmMsg(); as h) {
                 <p class="hmsg" [class.errtxt]="!h.ok">{{ h.text }}@if (h.path) { <button class="link mono" (click)="openMidi(h.path)">{{ fileName(h.path) }}</button> }</p>
               }
@@ -215,11 +269,17 @@
                   <div class="acts">
                     <button class="btn primary" (click)="runVoices()">Controlla</button>
                     <button class="btn" (click)="playVoices()">{{ playing() === 'satb' ? 'Ferma' : 'Ascolta le voci' }}</button>
+                    <select class="lvl" [ngModel]="exLevel()" (ngModelChange)="exLevel.set(+$event)" aria-label="Livello dell'esercizio">
+                      @for (l of exerciseLevels; track l.id) { <option [value]="l.id">{{ l.label }}</option> }
+                    </select>
                     <button class="btn" (click)="newExercise()" [disabled]="satbBusy()">Nuovo esercizio (basso dato)</button>
-                    @if (exercise()) { <button class="btn" (click)="showSolution()">Mostra una soluzione</button> }
+                    @if (exercise()) {
+                      <button class="btn" (click)="showSolution()">Mostra una soluzione</button>
+                      <button class="btn" (click)="exportExercise()">Esporta per Dorico</button>
+                    }
                     <button class="btn" (click)="askVoices()" [disabled]="!!busyId()">Fallo spiegare all'agente</button>
                   </div>
-                  @if (voiceReport(); as r) { <pre class="report" [class.errtxt]="!r.ok" [class.has-err]="r.errors">{{ r.text }}</pre> }
+                  @if (voiceReport(); as r) { <pre class="report" [class.errtxt]="!r.ok" [class.has-err]="r.errors" (click)="onMdClick($event)" [innerHTML]="reportHtml(r.text)"></pre> }
                 </div>
               }
             }
@@ -371,6 +431,39 @@
               <button class="btn primary" (click)="askMixer()" [disabled]="!!busyId()">Chiedi un parere su questo file</button>
               @if (song()) { <button class="btn" (click)="recordVersion()">Registra come versione del mix</button> }
             </div>
+            <section class="cmp"><h3 class="plain">Confronto A/B</h3>
+              <p class="dim small">A è il file misurato qui sopra. Confrontalo con un'altra versione del mix o con un brano di riferimento (a pari loudness conta la forma dello spettro).</p>
+              <div class="acts">
+                @if (otherVersions().length) {
+                  <select class="lvl" aria-label="Versione da confrontare" (change)="compareWith($any($event.target).value); $any($event.target).value = ''">
+                    <option value="">Confronta con una versione…</option>
+                    @for (v of otherVersions(); track v.file) { <option [value]="v.file">{{ v.date }} · {{ fileName(v.file) }}</option> }
+                  </select>
+                }
+                <button class="btn" (click)="compareReference()" [disabled]="comparing()">Brano di riferimento…</button>
+              </div>
+              @if (comparing()) { <p class="dim">Confronto i due file…</p> }
+              @if (comparison(); as c) {
+                @if (!c.ok) { <p class="errtxt">{{ c.message }}</p> } @else {
+                  <p class="small"><span class="leg a"></span> A {{ c.a }} &nbsp; <span class="leg b"></span> B {{ c.b }}@if (c.ref) { (riferimento) }</p>
+                  <svg class="spec" viewBox="0 0 300 120" role="img" aria-label="Spettri in terzi d'ottava di A e B">
+                    @for (g of [100, 1000, 10000]; track g) {
+                      <line [attr.x1]="(log10(g / 20) / 3) * 300" [attr.x2]="(log10(g / 20) / 3) * 300" y1="0" y2="120" class="grid"/>
+                      <text [attr.x]="(log10(g / 20) / 3) * 300 + 3" y="116" class="gl">{{ g >= 1000 ? g / 1000 + 'k' : g }}</text>
+                    }
+                    <path [attr.d]="spectrumPath(c.spectrumB)" class="sb"/>
+                    <path [attr.d]="spectrumPath(c.spectrumA)" class="sa"/>
+                  </svg>
+                  <ul class="sum">@for (t of c.summary; track $index) { <li>{{ t }}</li> }</ul>
+                  <table class="ctab mono">
+                    <tr><th></th><th>A</th><th>B</th><th>A−B</th></tr>
+                    @for (r of c.rows; track r.label) { <tr><td>{{ r.label }}</td><td>{{ r.a }}</td><td>{{ r.b }}</td><td [class.accent]="abs(r.d) >= 2">{{ r.d > 0 ? '+' : '' }}{{ r.d }}</td></tr> }
+                    @for (b of c.bands; track b.name) { <tr><td>{{ b.name }}</td><td>{{ b.a }}</td><td>{{ b.b }}</td><td [class.accent]="abs(b.d) >= 3">{{ b.d > 0 ? '+' : '' }}{{ b.d }}</td></tr> }
+                  </table>
+                  <button class="btn" (click)="askCompare()" [disabled]="!!busyId()">Chiedi al mixer cosa cambiare</button>
+                }
+              }
+            </section>
           } @else if (!measuring() && measureFile() && !measureError()) {
             <button class="btn" (click)="analyze(measureFile())">Misura {{ fileName(measureFile()) }}</button>
           }
