@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.3 — 2026-11-27
+
+### Cambiato
+- **Pannello della progressione ridisegnato**: non copre più la conversazione. In alto una barra compatta sempre visibile (sezione, ▶ ascolto, accordi cliccabili, BPM e uscita); aperta, mostra quattro schede (Accordi, Ascolto, Quattro voci ed esercizi, Forma e arrangiamento) con contenuto scorrevole. L'altezza si regola trascinando il divisore (o con le frecce, doppio clic per tornare a quella iniziale) e viene ricordata; la conversazione e il campo di scrittura restano sempre visibili.
+- Un brano senza progressione principale apre direttamente la prima sezione scritta (es. Verse).
+
 ## 0.5.2 — 2026-11-27
 
 ### Corretto

@@ -42,13 +42,15 @@ const BAND_LABELS: Record<string, string> = {
   'medio-alti 2-6 kHz': '2–6 kHz', 'alti 6-12 kHz': '6–12 kHz', 'aria 12-20 kHz': '12–20 kHz',
 };
 const LS = 'studio-agent.ui';
+const lsGet = (k: string) => { try { return localStorage.getItem(LS + k); } catch { return null; } };
+const lsSet = (k: string, v: string) => { try { localStorage.setItem(LS + k, v); } catch { /* ignora */ } };
 
 @Component({
   selector: 'app-root',
   imports: [FormsModule, DecimalPipe],
   templateUrl: './app.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { '(document:keydown.escape)': 'songMenu.set(false)', '(document:click)': 'onDocClick($event)' },
+  host: { '(document:keydown.escape)': 'songMenu.set(false)', '(document:click)': 'onDocClick($event)', '(window:resize)': 'onResize()' },
 })
 export class App {
   readonly phases = PHASES;
@@ -384,7 +386,41 @@ export class App {
 
   // ---------- armonia ----------
   readonly books = BOOKS;
-  harmOpen = signal(true);
+  // ---------- pannello della progressione: striscia compatta + schede, altezza regolabile ----------
+  harmOpen = signal(lsGet('.harmOpen') !== '0');
+  harmHeight = signal(Math.max(170, +(lsGet('.harmHeight') || 0) || 320));
+  readonly harmTabs = [
+    { id: 'chords', label: 'Accordi' }, { id: 'listen', label: 'Ascolto' },
+    { id: 'voices', label: 'Quattro voci ed esercizi' }, { id: 'form', label: 'Forma e arrangiamento' },
+  ] as const;
+  harmTab = signal<'chords' | 'listen' | 'voices' | 'form'>('chords');
+  winH = signal(typeof window !== 'undefined' ? window.innerHeight : 900);
+  /** Altezza effettiva: quella scelta, ma sempre lasciando spazio alla conversazione e al campo di scrittura. */
+  harmEffHeight = computed(() => Math.max(170, Math.min(this.harmHeight(), this.winH() - 480)));
+  onResize() { this.winH.set(window.innerHeight); }
+  toggleHarm() { this.harmOpen.update((v) => !v); lsSet('.harmOpen', this.harmOpen() ? '1' : '0'); }
+  openTab(t: 'chords' | 'listen' | 'voices' | 'form') { this.harmTab.set(t); if (!this.harmOpen()) this.toggleHarm(); }
+  /** Trascinando il divisore si cambia l'altezza del pannello; la conversazione resta sempre visibile. */
+  startResize(e: PointerEvent) {
+    const bar = e.currentTarget as HTMLElement;
+    const sec = bar.previousElementSibling as HTMLElement | null;
+    if (!sec) return;
+    e.preventDefault();
+    bar.setPointerCapture(e.pointerId);
+    const y0 = e.clientY, h0 = sec.getBoundingClientRect().height;
+    const max = Math.max(170, this.winH() - 480);
+    const move = (ev: PointerEvent) => this.harmHeight.set(Math.round(Math.min(max, Math.max(170, h0 + ev.clientY - y0))));
+    const up = () => { bar.removeEventListener('pointermove', move); bar.removeEventListener('pointerup', up); lsSet('.harmHeight', String(this.harmHeight())); };
+    bar.addEventListener('pointermove', move);
+    bar.addEventListener('pointerup', up);
+  }
+  resizeKey(e: KeyboardEvent) {
+    const d = e.key === 'ArrowUp' ? -24 : e.key === 'ArrowDown' ? 24 : 0;
+    if (!d) return;
+    e.preventDefault();
+    this.harmHeight.update((h) => Math.max(170, Math.min(this.winH() - 480, h + d)));
+    lsSet('.harmHeight', String(this.harmHeight()));
+  }
   prog = signal('');
   progKey = signal('');
   progBpm = signal('');
@@ -432,7 +468,6 @@ export class App {
     return i >= 0 && c ? `dopo «${c.name}» (accordo ${i + 1}, b. ${c.bar})` : 'in coda alla progressione';
   });
   harmMsg = signal<{ ok: boolean; text: string; path?: string } | null>(null);
-  voicesOpen = signal(false);
   voices = signal({ s: '', a: '', t: '', b: '' });
   voiceReport = signal<{ ok: boolean; errors?: boolean; text: string } | null>(null);
   showSource = computed(() => ['armonia', 'orchestrazione'].includes(this.phaseId()));
@@ -453,7 +488,10 @@ export class App {
     this.section.set('');
     this.insertAfter.set(-1);
     this.exercise.set(null);
-    this.prog.set(s?.progression || '');
+    // senza progressione principale si apre la prima sezione scritta (es. Verse)
+    const firstSec = !s?.progression ? (s?.sections ?? []).find((x) => x.section && x.progression) : undefined;
+    if (firstSec) this.section.set(firstSec.section);
+    this.prog.set(firstSec?.progression ?? s?.progression ?? '');
     this.progKey.set(keyForMidi(s?.key || '') || '');
     this.progBpm.set((s?.tempo.match(/(\d+)\s*BPM/i) || [])[1] || '');
     this.harmMsg.set(null);
@@ -509,7 +547,7 @@ export class App {
     if (!r.ok) { this.harmMsg.set({ ok: false, text: r.message || 'Realizzazione non riuscita' }); return; }
     this.exercise.set(null);
     this.voices.set({ s: r.s!, a: r.a!, t: r.t!, b: r.b! });
-    this.voicesOpen.set(true);
+    this.openTab('voices');
     const xml = r.files?.find((f) => /\.musicxml$/i.test(f));
     this.harmMsg.set({ ok: true, text: 'Realizzazione a quattro voci pronta (Soprano, Alto, Tenor, Bass). Partitura per Dorico:', path: xml });
     if (s) this.songs.set(await api.listSongs());
@@ -532,7 +570,7 @@ export class App {
     this.exercise.set({ title: pick.title, chords: pick.chords, line: pick.line, solution: { s: r.s!, a: r.a!, t: r.t!, b: r.b! }, ref: pick.ref });
     this.voices.set({ s: '', a: '', t: '', b: r.b! });
     this.voiceReport.set({ ok: true, text: `Basso dato in ${this.sugHome()}: scrivi Soprano, Alto e Tenor seguendo i gradi, poi «Controlla».` });
-    this.voicesOpen.set(true);
+    this.openTab('voices');
   }
   /** Esporta l'esercizio per Dorico: basso numerato e tre righi vuoti (Soprano, Alto, Tenor). */
   async exportExercise() {
@@ -720,7 +758,6 @@ export class App {
     { id: 'waltz', label: 'Valzer (3/4)' }, { id: 'arpeggio', label: 'Arpeggio (chitarra)' }, { id: 'chorale', label: 'Corale' },
   ];
   readonly melodyInstruments = ['Flute', 'Violin', 'Oboe', 'Clarinet', 'Trumpet', 'Vibraphone', 'Electric Piano', 'Acoustic Guitar', 'Lead Synth', 'Choir Aahs'];
-  formOpen = signal(false);
   formList = signal<string[]>([]);
   arrStyle = signal('pop');
   arrMelody = signal(true);
