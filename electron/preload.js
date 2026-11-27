@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('studio', {
   arrange: (req) => ipcRenderer.invoke('harmony:arrange', req),
   analyzeMidi: (song) => ipcRenderer.invoke('harmony:analyzeMidi', song),
   compareAudio: (req) => ipcRenderer.invoke('audio:compare', req),
+  pythonInfo: (again) => ipcRenderer.invoke('python:info', again),
   setForm: (song, form) => ipcRenderer.invoke('songs:form', song, form),
   bookPage: (book, page) => ipcRenderer.invoke('book:page', book, page),
   openBook: (book) => ipcRenderer.invoke('book:open', book),

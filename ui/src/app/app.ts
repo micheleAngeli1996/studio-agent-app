@@ -129,6 +129,19 @@ export class App {
     this.usage.set(usage);
     const pick = songs.find((s) => s.name === this.pendingSong) ?? songs[0];
     if (pick) this.selectSong(pick.name, false);
+    this.checkPython();
+  }
+
+  // Python usato dagli strumenti (l'app sceglie quello che ha le librerie)
+  python = signal<{ path: string; version: string; missing: string[] } | null>(null);
+  pyDismissed = signal(false);
+  pipCommand = computed(() => {
+    const p = this.python(); if (!p?.missing.length) return '';
+    const pkg: Record<string, string> = { fitz: 'pymupdf' };
+    return `"${p.path || 'python'}" -m pip install ${p.missing.map((m) => pkg[m] || m).join(' ')}`;
+  });
+  async checkPython(again = false) {
+    try { this.python.set(await api.pythonInfo(again)); } catch { /* anteprima */ }
   }
 
   async changeRoot() {

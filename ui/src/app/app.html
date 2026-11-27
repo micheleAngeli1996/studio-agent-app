@@ -33,7 +33,7 @@
             <span class="dim small clip" [title]="root()">Cartella: {{ root() || 'non impostata' }}</span>
             <button class="btn" (click)="changeRoot()">Cambia</button>
           </div>
-          @if (version()) { <p class="dim small pad">Studio Agent {{ version() }}</p> }
+          @if (version()) { <p class="dim small pad">Studio Agent {{ version() }}@if (python(); as py) { · Python {{ py.version || '?' }}@if (!py.missing.length) { · librerie a posto } }</p> }
         </div>
       }
     </div>
@@ -49,6 +49,10 @@
     </div>
   </header>
 
+  @if (pipCommand() && !pyDismissed()) {
+    <div class="notice" role="alert"><span>Il Python trovato ({{ python()!.path || 'python' }}) non ha tutte le librerie degli strumenti: mancano {{ python()!.missing.join(', ') }}. Installale da un terminale con <code class="mono">{{ pipCommand() }}</code></span>
+      <span class="row2"><button class="btn primary" (click)="checkPython(true)">Ricontrolla</button><button class="btn" (click)="pyDismissed.set(true)">Chiudi</button></span></div>
+  }
   @if (notice()) { <div class="notice" role="alert"><span>{{ notice() }}</span><span class="row2">@if (needsRoot()) { <button class="btn primary" (click)="changeRoot()">Scegli cartella</button> }<button class="btn" (click)="notice.set('')">Chiudi</button></span></div> }
 
   @if (zoomed() && pageImg()) {

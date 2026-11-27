@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1 — 2026-11-27
+
+### Corretto
+- **Python giusto per strumenti e agenti**: su Windows il comando `python` può aprire un'installazione senza librerie (es. Python Install Manager 3.14). L'app ora cerca il Python che ha mido, numpy, scipy, music21, soundfile, pyloudnorm e pymupdf, lo usa per gli strumenti e lo mette in testa al PATH degli agenti; se nessuno le ha, mostra il comando `pip install` da eseguire. Versione di Python indicata nel menu dei brani.
+
 ## 0.5.0 — 2026-11-27
 
 ### Aggiunto

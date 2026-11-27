@@ -28,8 +28,71 @@ function resolveRoot() {
 let ROOT = resolveRoot();
 
 function config() {
-  const def = { claudeCommand: 'claude', pythonCommand: process.platform === 'win32' ? 'python' : 'python3' };
+  const def = { claudeCommand: 'claude', pythonCommand: PYTHON.path || (process.platform === 'win32' ? 'python' : 'python3') };
   return { ...def, ...readJson(path.join(APP_DIR, 'config.json'), {}), ...(settings().commands || {}) };
+}
+
+// ---------- Python con le librerie degli strumenti ----------
+// Su Windows «python» può essere un'installazione senza librerie (es. Python Install Manager 3.14):
+// l'app cerca un Python che abbia mido, numpy, music21, soundfile, pyloudnorm e pymupdf e lo usa
+// sia per gli strumenti sia per gli agenti (mettendo la sua cartella in testa al PATH).
+const PY_LIBS = ['mido', 'numpy', 'scipy', 'music21', 'soundfile', 'pyloudnorm', 'fitz'];
+let PYTHON = { path: '', version: '', missing: [], checked: false };
+function pythonCandidates() {
+  const c = [];
+  const fixed = (settings().commands || {}).pythonCommand;
+  if (fixed) c.push(fixed);
+  if (process.platform === 'win32') {
+    const la = process.env.LOCALAPPDATA || '';
+    const dirs = [path.join(la, 'Programs', 'Python'), path.join(la, 'Python'), 'C:\\Program Files', 'C:\\'];
+    for (const d of dirs) {
+      try {
+        for (const n of fs.readdirSync(d).filter((x) => /^(python|pythoncore-)\d/i.test(x)).sort().reverse()) {
+          const exe = path.join(d, n, 'python.exe');
+          if (fs.existsSync(exe)) c.push(exe);
+        }
+      } catch { /* cartella assente */ }
+    }
+    c.push('python', 'py');
+  } else c.push('python3', 'python');
+  return [...new Set(c)];
+}
+function probePython(cmd) {
+  return new Promise((resolve) => {
+    const code = `import sys,importlib.util as u;print(sys.executable);print(sys.version.split()[0]);print(','.join(m for m in ${JSON.stringify(PY_LIBS)} if u.find_spec(m) is None))`;
+    let out = '';
+    let child;
+    try { child = spawn(cmd, ['-c', code], { windowsHide: true }); } catch { return resolve(null); }
+    const t = setTimeout(() => { try { child.kill(); } catch { /* già chiuso */ } resolve(null); }, 8000);
+    child.stdout.on('data', (d) => { out += d; });
+    child.on('error', () => { clearTimeout(t); resolve(null); });
+    child.on('close', (code0) => {
+      clearTimeout(t);
+      const [exe, version, missing] = out.trim().split(/\r?\n/);
+      resolve(code0 === 0 && exe ? { path: exe.trim(), version: (version || '').trim(), missing: (missing || '').trim() ? missing.trim().split(',') : [] } : null);
+    });
+  });
+}
+async function detectPython() {
+  let best = null;
+  for (const cmd of pythonCandidates()) {
+    const r = await probePython(cmd);
+    if (!r) continue;
+    if (!best || r.missing.length < best.missing.length) best = r;
+    if (!r.missing.length) break;
+  }
+  PYTHON = best ? { ...best, checked: true } : { path: '', version: '', missing: PY_LIBS, checked: true };
+  return PYTHON;
+}
+/** Ambiente per i processi figli: il Python scelto viene prima nel PATH, così anche gli agenti lo usano. */
+function childEnv() {
+  const env = { ...process.env, PYTHONIOENCODING: 'utf-8' };
+  if (PYTHON.path && path.isAbsolute(PYTHON.path)) {
+    const dir = path.dirname(PYTHON.path);
+    const key = Object.keys(env).find((k) => k.toLowerCase() === 'path') || 'PATH';
+    env[key] = [dir, path.join(dir, 'Scripts'), env[key] || ''].join(path.delimiter);
+  }
+  return env;
 }
 
 async function chooseRoot(parent) {
@@ -62,6 +125,7 @@ function createWindow() {
 function inside(p) { const r = path.resolve(p); return r === ROOT || r.startsWith(ROOT + path.sep); }
 
 ipcMain.handle('info', () => ({ root: ROOT, hasAgents: isProject(ROOT), version: app.getVersion() }));
+ipcMain.handle('python:info', async (_e, again) => { if (again) pyDetect = null; return ensurePython(); });
 ipcMain.handle('settings:chooseRoot', () => chooseRoot(win));
 ipcMain.handle('songs:list', () => songs.listSongs(ROOT));
 ipcMain.handle('songs:create', (_e, data) => songs.createSong(ROOT, data));
@@ -77,9 +141,13 @@ ipcMain.handle('audio:pick', async () => {
   return r.canceled ? null : r.filePaths[0];
 });
 
-function runPy(args) {
+let pyDetect = null;
+function ensurePython() { return pyDetect || (pyDetect = detectPython()); }
+
+async function runPy(args) {
+  await ensurePython();
   return new Promise((resolve) => {
-    const child = spawn(config().pythonCommand, args, { cwd: ROOT, windowsHide: true, env: { ...process.env, PYTHONIOENCODING: 'utf-8' } });
+    const child = spawn(config().pythonCommand, args, { cwd: ROOT, windowsHide: true, env: childEnv() });
     let out = ''; let err = '';
     child.stdout.on('data', (d) => { out += d; });
     child.stderr.on('data', (d) => { err += d; });
@@ -200,8 +268,8 @@ ipcMain.handle('book:open', (_e, book) => {
   return shell.openPath(b.pdf);
 });
 
-ipcMain.handle('audio:analyze', (_e, filePath) => new Promise((resolve) => {
-  const child = spawn(config().pythonCommand, [path.join(ROOT, 'tools', 'analyze.py'), filePath, '--json'], { cwd: ROOT, windowsHide: true });
+ipcMain.handle('audio:analyze', async (_e, filePath) => { await ensurePython(); return new Promise((resolve) => {
+  const child = spawn(config().pythonCommand, [path.join(ROOT, 'tools', 'analyze.py'), filePath, '--json'], { cwd: ROOT, windowsHide: true, env: childEnv() });
   let out = ''; let err = '';
   child.stdout.on('data', (d) => { out += d; });
   child.stderr.on('data', (d) => { err += d; });
@@ -210,7 +278,7 @@ ipcMain.handle('audio:analyze', (_e, filePath) => new Promise((resolve) => {
     if (code !== 0) return resolve({ ok: false, message: (err.trim().split('\n').pop() || 'Analisi non riuscita') });
     try { resolve({ ok: true, data: JSON.parse(out) }); } catch { resolve({ ok: false, message: 'Risposta dello strumento di analisi non leggibile' }); }
   });
-}));
+}); });
 
 // Confronto tra due file audio (tools/compare.py): due versioni del mix o il mix e un riferimento
 function resolveAudio(song, p) {
@@ -234,10 +302,11 @@ ipcMain.handle('audio:compare', async (_e, { song, a, b, ref }) => {
   return JSON.parse(line);
 });
 
-ipcMain.handle('agent:ask', (e, req) => {
+ipcMain.handle('agent:ask', async (e, req) => {
+  await ensurePython();
   const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const started = Date.now();
-  const handle = claude.ask(req, { cwd: ROOT, command: config().claudeCommand }, (ev) => {
+  const handle = claude.ask(req, { cwd: ROOT, command: config().claudeCommand, env: childEnv() }, (ev) => {
     if (ev.type === 'done') {
       usage.record(DATA_DIR, { agent: req.agent, song: req.song || '', phase: req.phase || '', request: String(req.label || req.prompt).slice(0, 90),
         input: ev.usage.input, output: ev.usage.output, cacheRead: ev.usage.cacheRead, durationMs: ev.durationMs || (Date.now() - started),
@@ -264,6 +333,7 @@ if (!app.requestSingleInstanceLock()) {
     const midiPerm = (perm) => perm === 'midi' || perm === 'midiSysex';
     session.defaultSession.setPermissionRequestHandler((_wc, perm, cb) => cb(midiPerm(perm)));
     session.defaultSession.setPermissionCheckHandler((_wc, perm) => midiPerm(perm));
+    ensurePython();                                   // cerca subito il Python con le librerie
     if (!ROOT) {
       await dialog.showMessageBox({ type: 'info', title: 'Studio Agent', message: 'Scegli la cartella studio-agent',
         detail: 'Studio Agent usa gli agenti, i brani e gli strumenti che stanno nella tua cartella studio-agent (quella con .claude\\agents). Potrai cambiarla in seguito dal menu dei brani.' });

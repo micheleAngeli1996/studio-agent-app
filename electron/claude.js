@@ -20,15 +20,15 @@ function toolSummary(name, input = {}) {
   return name;
 }
 
-/** ask({agent, prompt, resume}, {cwd, command}, onEvent) -> {cancel()} */
-function ask({ agent, prompt, resume }, { cwd, command = 'claude' }, onEvent) {
+/** ask({agent, prompt, resume}, {cwd, command, env}, onEvent) -> {cancel()} */
+function ask({ agent, prompt, resume }, { cwd, command = 'claude', env }, onEvent) {
   const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--agent', agent,
     '--permission-mode', 'acceptEdits', '--allowedTools', ...ALLOWED];
   if (resume) args.push('--resume', resume);
   const win = process.platform === 'win32';
   const child = win
-    ? spawn([command, ...args].map(quote).join(' '), { cwd, shell: true, windowsHide: true })
-    : spawn(command, args, { cwd });
+    ? spawn([command, ...args].map(quote).join(' '), { cwd, shell: true, windowsHide: true, env: env || process.env })
+    : spawn(command, args, { cwd, env: env || process.env });
   let done = false;
   let stderr = '';
   const finish = (ev) => { if (!done) { done = true; onEvent(ev); } };

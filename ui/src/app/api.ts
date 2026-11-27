@@ -38,6 +38,7 @@ export interface Analysis { ok: boolean; data?: Record<string, any>; message?: s
 
 export interface StudioApi {
   info(): Promise<{ root: string; hasAgents: boolean; version?: string }>;
+  pythonInfo(again?: boolean): Promise<{ path: string; version: string; missing: string[] }>;
   chooseRoot(): Promise<{ ok: boolean; root: string; message?: string }>;
   listSongs(): Promise<Song[]>;
   createSong(d: { title: string; bpm?: string; key?: string }): Promise<Song>;
@@ -83,6 +84,7 @@ function demoApi(): StudioApi {
   let listener: (id: string, ev: AgentEvent) => void = () => {};
   return {
     info: async () => ({ root: '(anteprima)', hasAgents: true, version: 'anteprima' }),
+    pythonInfo: async () => ({ path: 'python', version: '3.13.5', missing: [] }),
     chooseRoot: async () => ({ ok: false, root: '(anteprima)', message: 'Disponibile solo nell\'app.' }),
     listSongs: async () => structuredClone(songs),
     createSong: async (d) => { const s = { ...structuredClone(song), name: d.title, title: d.title, key: d.key || '', tempo: `${d.bpm || ''} BPM, 4/4`, phase: 'idea', decisions: [], versions: [] }; songs.push(s); return s; },
